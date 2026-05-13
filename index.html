@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>LiftTogether</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body { background:#070d18; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // localStorage polyfill so the app saves data on GitHub Pages
+    window.storage = {
+      get: async (key) => {
+        try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; }
+      },
+      set: async (key, value) => {
+        try { localStorage.setItem(key, value); return {value}; } catch(e){ return null; }
+      }
+    };
+
+const SCHED = { 0:"lowerB", 1:"upperA", 2:null, 3:"lowerA", 4:"upperB", 5:null, 6:null };
+const DNAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const DSHRT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+const WO = {
+  upperA:{ name:"Upper A", sub:"Chest · Shoulders · Triceps", clr:"#4da6ff",
+    exercises:[
+      {id:"bench",   name:"Bench Press",     short:"Bench",      icon:"🏋️", l:{s:4,r:8},  g:{s:4,r:12}},
+      {id:"ohp",     name:"Overhead Press",  short:"OHP",        icon:"💪", l:{s:4,r:8},  g:{s:3,r:12}},
+      {id:"incline", name:"Incline Press",   short:"Incline",    icon:"📐", l:{s:3,r:10}, g:{s:3,r:15}},
+      {id:"ltraise", name:"Lateral Raises",  short:"Laterals",   icon:"🦾", l:{s:3,r:15}, g:{s:3,r:20}},
+      {id:"pushdn",  name:"Tricep Pushdown", short:"Pushdown",   icon:"⚡", l:{s:3,r:12}, g:{s:3,r:15}},
+      {id:"triext",  name:"OT Extension",    short:"OT Ext",     icon:"🔥", l:{s:3,r:12}, g:{s:3,r:15}},
+    ]},
+  lowerA:{ name:"Lower A", sub:"Quads · Glutes · Calves", clr:"#a78bfa",
+    exercises:[
+      {id:"squat",   name:"Back Squat",      short:"Squat",      icon:"🏆", l:{s:4,r:8},  g:{s:4,r:12}},
+      {id:"rdl",     name:"Romanian DL",     short:"RDL",        icon:"🏋️", l:{s:3,r:10}, g:{s:3,r:12}},
+      {id:"legprs",  name:"Leg Press",       short:"Leg Press",  icon:"🦵", l:{s:3,r:12}, g:{s:3,r:15}},
+      {id:"lunges",  name:"Lunges",          short:"Lunges",     icon:"🚶", l:{s:3,r:10,note:"ea"}, g:{s:3,r:12,note:"ea"}},
+      {id:"legext",  name:"Leg Extension",   short:"Leg Ext",    icon:"🦵", l:{s:3,r:15}, g:{s:3,r:20}},
+      {id:"calfs",   name:"Calf Raises",     short:"Calves",     icon:"👟", l:{s:4,r:20}, g:{s:4,r:20}},
+    ]},
+  upperB:{ name:"Upper B", sub:"Back · Biceps", clr:"#34d399",
+    exercises:[
+      {id:"bbrow",   name:"Barbell Row",     short:"BB Row",     icon:"🏋️", l:{s:4,r:8},  g:{s:4,r:12}},
+      {id:"pulldn",  name:"Lat Pulldown",    short:"Pulldown",   icon:"⬇️", l:{s:3,r:10}, g:{s:3,r:12}},
+      {id:"cblrow",  name:"Cable Row",       short:"Cable Row",  icon:"🔄", l:{s:3,r:12}, g:{s:3,r:15}},
+      {id:"facpul",  name:"Face Pulls",      short:"Face Pulls", icon:"🎯", l:{s:3,r:20}, g:{s:3,r:20}},
+      {id:"dbcurl",  name:"DB Curl",         short:"DB Curl",    icon:"💪", l:{s:3,r:12}, g:{s:3,r:15}},
+      {id:"hammer",  name:"Hammer Curl",     short:"Hammer",     icon:"🔨", l:{s:3,r:12}, g:{s:3,r:15}},
+    ]},
+  lowerB:{ name:"Lower B", sub:"Hamstrings · Glutes", clr:"#fbbf24",
+    exercises:[
+      {id:"deadlft", name:"Deadlift",        short:"Deadlift",   icon:"🏆", l:{s:4,r:6},  g:{s:4,r:10}},
+      {id:"hipthrs", name:"Hip Thrust",      short:"Hip Thrust", icon:"🍑", l:{s:4,r:12}, g:{s:4,r:15}},
+      {id:"legcrl",  name:"Leg Curl",        short:"Leg Curl",   icon:"🦵", l:{s:3,r:12}, g:{s:3,r:15}},
+      {id:"bss",     name:"Bulgarian Split", short:"BSS",        icon:"🚀", l:{s:3,r:10,note:"ea"}, g:{s:3,r:12,note:"ea"}},
+      {id:"adduct",  name:"Adductor",        short:"Adductor",   icon:"🦵", l:{s:3,r:15}, g:{s:3,r:20}},
+      {id:"calfst",  name:"Seated Calves",   short:"Calves",     icon:"👟", l:{s:3,r:20}, g:{s:3,r:20}},
+    ]}
+};
+
+const DW = {
+  bench:{l:95,g:65},ohp:{l:65,g:45},incline:{l:35,g:20},
+  ltraise:{l:10,g:8},pushdn:{l:50,g:35},triext:{l:40,g:25},
+  squat:{l:95,g:65},rdl:{l:85,g:55},legprs:{l:135,g:90},
+  lunges:{l:20,g:15},legext:{l:60,g:45},calfs:{l:90,g:60},
+  bbrow:{l:95,g:65},pulldn:{l:80,g:55},cblrow:{l:70,g:50},
+  facpul:{l:30,g:20},dbcurl:{l:25,g:15},hammer:{l:25,g:15},
+  deadlft:{l:115,g:75},hipthrs:{l:95,g:65},legcrl:{l:50,g:35},
+  bss:{l:20,g:15},adduct:{l:50,g:40},calfst:{l:70,g:50}
+};
+
+const DEMO = {
+  bench:{equip:"Flat barbell bench + spotter or Smith machine",cues:["Grip just outside shoulder-width","Slight arch, feet flat on floor","Bar touches lower chest not your neck","Drive through feet as you press up","Control the bar down dont bounce"],yt:"barbell+bench+press+form+tutorial"},
+  ohp:{equip:"Barbell or dumbbells, standing or seated",cues:["Grip just outside shoulders, elbows slightly in front","Brace core hard dont arch lower back","Press straight up bar passes your face close","Lock out at top, ears in front of arms","Lower controlled back to collarbone"],yt:"overhead+press+form+tutorial"},
+  incline:{equip:"Incline bench 30-45 deg + dumbbells",cues:["30-45 deg max, higher hits more shoulder less chest","Lower DBs to outside of chest elbows at 75 deg","Press up and in, DBs nearly touch at top","Feel the stretch at the bottom","Slow eccentric, control the lowering"],yt:"incline+dumbbell+press+form+tutorial"},
+  ltraise:{equip:"Cable machine or dumbbells",cues:["Slight bend in elbow, keep it fixed","Lead with your elbow not your wrist","Only raise to shoulder height not above","Pause at the top for a beat","Slow lower dont let it drop"],yt:"cable+lateral+raise+form+tutorial"},
+  pushdn:{equip:"Cable machine, rope or straight bar",cues:["Elbows pinned to sides they dont move","Start at 90 deg elbow angle","Push down to full extension","Squeeze triceps hard at the bottom","Controlled return dont let it yank you"],yt:"tricep+pushdown+cable+form+tutorial"},
+  triext:{equip:"Cable or EZ-bar, overhead attachment",cues:["Elbows pointed straight up","Upper arms locked, only forearms move","Lower until forearms touch biceps","Drive to full extension squeeze at top","Brace core so ribs dont flare"],yt:"overhead+tricep+extension+form+tutorial"},
+  squat:{equip:"Squat rack + barbell",cues:["Bar on upper traps or rear delts","Stance slightly wider than hips, toes out","Push knees out in line with toes","Hit parallel, hip crease below knee","Drive hips up first, chest tall"],yt:"barbell+back+squat+form+tutorial"},
+  rdl:{equip:"Barbell or dumbbells",cues:["Soft knee bend, hip hinge not a squat","Push hips back, bar stays close to legs","Stop at strong hamstring stretch ~shin level","Drive hips forward, squeeze glutes at top","Neutral spine always dont round lower back"],yt:"romanian+deadlift+form+tutorial"},
+  legprs:{equip:"Leg press machine",cues:["Feet shoulder-width, toes slightly out","Lower to ~90 deg no further","Dont let knees cave, push them out","Dont lock knees at top","Higher foot = more hamstrings, lower = more quads"],yt:"leg+press+machine+form+tutorial"},
+  lunges:{equip:"Dumbbells or bodyweight to start",cues:["Step far enough so front knee stays over ankle","Back knee lowers toward floor dont slam","Torso upright dont lean forward","Push through front heel to return","Both legs should feel equally worked"],yt:"walking+lunge+dumbbell+form+tutorial"},
+  legext:{equip:"Leg extension machine",cues:["Pad just above your ankle","Full extension at top squeeze quads hard","2-3 second eccentric on the way down","No swinging or momentum","Sit fully back in seat for proper quad angle"],yt:"leg+extension+machine+form+tutorial"},
+  calfs:{equip:"Standing calf raise machine or Smith machine",cues:["Deep stretch at the very bottom","Pause at bottom before each rep","Push through ball of foot","Squeeze at the very top","Slow the lowering phase thats where growth is"],yt:"standing+calf+raise+form+tutorial"},
+  bbrow:{equip:"Barbell, load from rack or deadlift from floor",cues:["~45 deg torso angle, back neutral","Pull bar to lower chest/upper belly","Drive elbows back, squeeze shoulder blades","Lower with control dont drop it","Keep lower back flat throughout"],yt:"barbell+row+form+tutorial"},
+  pulldn:{equip:"Lat pulldown cable machine",cues:["Wide overhand grip just outside shoulder-width","Lean back slightly, chest up","Pull bar to upper chest not behind neck","Squeeze lats hard at the bottom","Full stretch at the top on the way up"],yt:"lat+pulldown+form+tutorial"},
+  cblrow:{equip:"Seated cable row, V-bar or wide grip",cues:["Sit tall, slight lean back from hips","Pull handle to lower chest/belly","Squeeze shoulder blades hard at the end","Slow eccentric dont get pulled forward","Core braced throughout"],yt:"seated+cable+row+form+tutorial"},
+  facpul:{equip:"Cable machine, rope at face height",cues:["Stand back a couple feet, slight lean","Pull rope to face, hands near ears at peak","Elbows flare outward and upward","Squeeze rear delts and external rotators hard","Light weight strict form its a health exercise"],yt:"face+pull+cable+form+tutorial"},
+  dbcurl:{equip:"Dumbbells",cues:["Elbows pinned to sides","Supinate rotate wrist as you curl up","Squeeze bicep hard at the top","Lower all the way full extension matters","No swinging if swinging its too heavy"],yt:"dumbbell+bicep+curl+form+tutorial"},
+  hammer:{equip:"Dumbbells",cues:["Neutral grip palms face each other throughout","Same motion as regular curl but no rotation","Hits brachialis adds outer arm thickness","Alternating or both at once both work","Control the lowering dont drop it"],yt:"hammer+curl+dumbbell+form+tutorial"},
+  deadlft:{equip:"Barbell, bumper plates or standard with mats",cues:["Feet hip-width, bar over mid-foot","Hip hinge, grip just outside your legs","Big breath, brace core, neutral spine before you pull","Drive the floor away, legs and hips together","Hips and shoulders rise at same rate dont shoot hips first"],yt:"conventional+deadlift+form+tutorial"},
+  hipthrs:{equip:"Hip thrust machine or bench + barbell",cues:["Upper back on bench edge, feet flat","Drive through heels, squeeze glutes hard at top","Body parallel to floor at top not hyperextended","Chin tucked dont crank your neck","Lower controlled, hips dont touch ground between reps"],yt:"hip+thrust+glute+form+tutorial"},
+  legcrl:{equip:"Lying leg curl machine",cues:["Pad just above your ankles","Curl heels toward glutes full range","Squeeze hamstrings hard at peak","Lower slowly 2-3 seconds down","Hips stay flat dont lift them as you curl"],yt:"lying+leg+curl+machine+form+tutorial"},
+  bss:{equip:"Dumbbells + bench or box behind you",cues:["Back foot elevated laces down","Front foot far enough so knee stays over ankle","Lower back knee toward floor torso upright","Front leg does the work push through that heel","Start light its harder than it looks"],yt:"bulgarian+split+squat+form+tutorial"},
+  adduct:{equip:"Inner thigh adductor machine",cues:["Adjust for a good stretch at start","Squeeze legs together in smooth motion","Pause and hold at end range","Slow return dont let it yank your legs open","Great for hip stability"],yt:"adductor+machine+inner+thigh+form"},
+  calfst:{equip:"Seated calf raise machine",cues:["Pad sits just above your knees","Deeper stretch than standing due to knee angle","Drive through balls of feet to full extension","Lower all the way the deep stretch is the point","Dont bounce out of the bottom"],yt:"seated+calf+raise+machine+form+tutorial"},
+};
+
+const MEALS = [
+  {day:"Sunday",tag:"Gym Day + Meal Prep",meals:[
+    {name:"Big Protein Breakfast",type:"Breakfast",emoji:"🍳",desc:"Pre-gym fuel. Eat this 2-3 hrs before your evening workout.",
+     ingredients:[{item:"Whole eggs",l:"4 eggs",g:"3 eggs"},{item:"Rolled oats (dry)",l:"100g",g:"70g"},{item:"Whole milk",l:"250ml",g:"200ml"},{item:"Banana",l:"1 large",g:"1 medium"},{item:"Peanut butter on oats",l:"30g",g:"skip"}],
+     note:"Make the oats first, eat eggs on the side scrambled or fried.",pin:"pre+workout+high+protein+breakfast+recipe",cal:{l:820,g:520},pro:{l:42,g:34}},
+    {name:"Batch Meal Prep",type:"Lunch + Prep",emoji:"🍱",desc:"Cook once, eat all week. Do this while you rest after your workout.",
+     ingredients:[{item:"Chicken thighs (Logan) / breast (GF)",l:"total 1.2kg",g:"included"},{item:"White rice (dry)",l:"600g",g:"included"},{item:"Sweet potatoes",l:"4-5 medium",g:"included"},{item:"Broccoli or mixed veg",l:"600g bag",g:"included"},{item:"Seasoning",l:"garlic, paprika, salt",g:"same"}],
+     note:"Portion into containers when done. Logan gets bigger scoops. Labels help.",pin:"weekly+meal+prep+chicken+rice+vegetables+recipe",cal:{l:0,g:0},pro:{l:0,g:0}},
+    {name:"Post-Workout Steak Night",type:"Dinner",emoji:"🥩",desc:"You worked out. Eat a proper dinner. Steak once a week is great for iron and satiety.",
+     ingredients:[{item:"Sirloin or ribeye steak",l:"280g",g:"200g"},{item:"White rice (cooked)",l:"200g",g:"100g"},{item:"Asparagus or broccoli",l:"150g",g:"200g"},{item:"Butter + garlic for pan",l:"15g butter",g:"10g butter"},{item:"Salt, pepper, rosemary",l:"to taste",g:"to taste"}],
+     note:"Cast iron pan at high heat. 3-4 min per side for medium. Rest 5 min before cutting.",pin:"pan+seared+steak+asparagus+rice+dinner+recipe",cal:{l:850,g:570},pro:{l:58,g:44}},
+  ]},
+  {day:"Monday",tag:"Gym Day",meals:[
+    {name:"Egg and Oat Powerup",type:"Breakfast",emoji:"🍳",desc:"Classic high-protein morning. Filling, easy, hits macros hard.",
+     ingredients:[{item:"Rolled oats (dry)",l:"100g",g:"65g"},{item:"Whole milk",l:"300ml",g:"200ml"},{item:"Whole eggs",l:"3 eggs",g:"2 eggs"},{item:"Banana",l:"1 large (150g)",g:"1 small (100g)"},{item:"Peanut butter",l:"30g",g:"skip or 10g"}],
+     note:"Cook oats in milk. Scramble or fry eggs on the side.",pin:"high+protein+oatmeal+eggs+breakfast+recipe",cal:{l:760,g:480},pro:{l:35,g:28}},
+    {name:"Chicken Rice Bowl",type:"Lunch",emoji:"🍚",desc:"The workhorse of meal prep. Make a big batch Sunday and eat all week.",
+     ingredients:[{item:"Chicken thighs (cooked boneless)",l:"220g",g:"160g"},{item:"White rice (cooked)",l:"300g",g:"180g"},{item:"Broccoli (steamed)",l:"100g",g:"150g"},{item:"Olive oil or butter",l:"15ml",g:"5ml"},{item:"Soy sauce + garlic",l:"to taste",g:"to taste"}],
+     note:"Logan uses thighs for extra calories. GF can swap to breast.",pin:"meal+prep+chicken+rice+bowl+recipe",cal:{l:820,g:510},pro:{l:52,g:42}},
+    {name:"Beef and Veggie Stir Fry",type:"Dinner",emoji:"🥩",desc:"Quick weeknight dinner. Works with rice or noodles.",
+     ingredients:[{item:"Lean ground beef (90/10)",l:"250g raw",g:"180g raw"},{item:"White rice (cooked)",l:"250g",g:"130g"},{item:"Bell peppers + snap peas",l:"200g total",g:"250g total"},{item:"Sesame oil",l:"15ml",g:"8ml"},{item:"Soy sauce, ginger, garlic",l:"to taste",g:"to taste"}],
+     note:"GF gets more veggies to fill the plate — keeps her full without the extra carb calories.",pin:"ground+beef+stir+fry+rice+recipe",cal:{l:810,g:520},pro:{l:48,g:40}},
+  ]},
+  {day:"Tuesday",tag:"Rest Day",meals:[
+    {name:"Greek Yogurt Parfait",type:"Breakfast",emoji:"🫙",desc:"Lower carb rest-day breakfast. High protein, quick to make.",
+     ingredients:[{item:"Plain Greek yogurt (2%)",l:"300g",g:"250g"},{item:"Granola",l:"60g",g:"25g"},{item:"Mixed berries",l:"100g",g:"120g"},{item:"Honey",l:"15g",g:"skip"},{item:"Whey protein mixed in",l:"1 scoop 30g",g:"1 scoop 30g"}],
+     note:"Mix protein powder into yogurt before adding toppings so it blends smooth.",pin:"greek+yogurt+parfait+high+protein+recipe",cal:{l:680,g:430},pro:{l:48,g:44}},
+    {name:"Turkey Sandwich + Salad",type:"Lunch",emoji:"🥪",desc:"Simple and fast. Great for a rest day when you want something lighter.",
+     ingredients:[{item:"Whole grain bread",l:"3 slices",g:"2 slices"},{item:"Deli turkey breast",l:"150g",g:"120g"},{item:"Swiss cheese",l:"2 slices 40g",g:"1 slice 20g"},{item:"Avocado",l:"80g",g:"40g"},{item:"Side salad greens cucumber tomato",l:"big bowl",g:"big bowl"},{item:"Light dressing",l:"30ml",g:"15ml"}],
+     note:"Both get the same salad. GF just cuts back on bread and cheese.",pin:"turkey+avocado+sandwich+healthy+recipe",cal:{l:650,g:430},pro:{l:40,g:36}},
+    {name:"Baked Salmon + Sweet Potato",type:"Dinner",emoji:"🐟",desc:"One of the best balanced dinners you can make. Minimal cleanup too.",
+     ingredients:[{item:"Salmon fillet",l:"220g",g:"170g"},{item:"Sweet potato",l:"250g",g:"150g"},{item:"Green beans or asparagus",l:"150g",g:"200g"},{item:"Olive oil",l:"15ml",g:"8ml"},{item:"Lemon, garlic, salt, pepper",l:"to taste",g:"to taste"}],
+     note:"400F for 15-18 min. Sheet pan everything for easy cleanup.",pin:"baked+salmon+sweet+potato+sheet+pan+recipe",cal:{l:760,g:510},pro:{l:46,g:38}},
+  ]},
+  {day:"Wednesday",tag:"Gym Day",meals:[
+    {name:"Protein Pancakes",type:"Breakfast",emoji:"🥞",desc:"Tastes like a treat, hits like a gym meal.",
+     ingredients:[{item:"Rolled oats blended into flour",l:"80g",g:"60g"},{item:"Whey protein powder",l:"2 scoops 60g",g:"1.5 scoops 45g"},{item:"Whole eggs",l:"2 eggs",g:"2 eggs"},{item:"Banana mashed into batter",l:"1 medium",g:"half"},{item:"Greek yogurt topping",l:"100g",g:"100g"},{item:"Berries topping",l:"80g",g:"100g"}],
+     note:"Blend oats + protein + eggs + banana. Cook like regular pancakes on medium heat.",pin:"oat+protein+pancakes+healthy+recipe",cal:{l:720,g:500},pro:{l:55,g:48}},
+    {name:"Ground Turkey Taco Bowl",type:"Lunch",emoji:"🌮",desc:"Basically a deconstructed taco. Quick and easy.",
+     ingredients:[{item:"Ground turkey 93% lean",l:"220g raw",g:"180g raw"},{item:"White rice (cooked)",l:"250g",g:"150g"},{item:"Black beans",l:"80g",g:"80g"},{item:"Salsa",l:"60g",g:"60g"},{item:"Shredded cheese",l:"30g",g:"15g"},{item:"Sour cream",l:"30g",g:"skip"},{item:"Lettuce + tomato",l:"side",g:"generous side"}],
+     note:"Same bowl. Logan just gets more rice and sour cream.",pin:"ground+turkey+taco+bowl+meal+prep+recipe",cal:{l:790,g:520},pro:{l:52,g:46}},
+    {name:"Chicken Thigh Pasta",type:"Dinner",emoji:"🍝",desc:"Comfort food that actually fits the macros.",
+     ingredients:[{item:"Chicken thighs boneless skinless",l:"240g",g:"170g"},{item:"Pasta (dry)",l:"100g",g:"70g"},{item:"Marinara or tomato sauce",l:"120g",g:"100g"},{item:"Parmesan cheese",l:"20g",g:"10g"},{item:"Zucchini or spinach",l:"100g",g:"150g"},{item:"Garlic + olive oil",l:"10ml oil",g:"5ml oil"}],
+     note:"GF gets more zucchini to keep the plate full without extra pasta calories.",pin:"chicken+pasta+tomato+sauce+healthy+dinner+recipe",cal:{l:830,g:530},pro:{l:51,g:40}},
+  ]},
+  {day:"Thursday",tag:"Gym Day",meals:[
+    {name:"Eggs, Toast and Fruit",type:"Breakfast",emoji:"🍞",desc:"Simple, quick, no-fuss. Easy to throw together before work.",
+     ingredients:[{item:"Whole eggs",l:"4 eggs",g:"3 eggs"},{item:"Whole grain toast",l:"3 slices",g:"2 slices"},{item:"Avocado",l:"60g",g:"40g"},{item:"Orange or apple",l:"1 large",g:"1 medium"},{item:"Butter for pan",l:"10g",g:"5g"}],
+     note:"Scrambled or over-easy. Keep it simple.",pin:"eggs+toast+avocado+healthy+breakfast+recipe",cal:{l:700,g:470},pro:{l:34,g:28}},
+    {name:"Meal Prep Rice Bowl",type:"Lunch",emoji:"🥗",desc:"Whatever protein you prepped Sunday. Free lunch.",
+     ingredients:[{item:"Any prepped protein chicken beef turkey",l:"220g",g:"160g"},{item:"Rice (cooked)",l:"270g",g:"160g"},{item:"Roasted veggies",l:"150g",g:"200g"},{item:"Hot sauce or teriyaki",l:"to taste",g:"to taste"},{item:"Shredded cheese optional",l:"25g",g:"skip"}],
+     note:"This is why you meal prep on Sunday. Thursday lunch is basically free.",pin:"meal+prep+protein+rice+bowl+recipe",cal:{l:790,g:490},pro:{l:50,g:40}},
+    {name:"Pork Tenderloin + Potatoes",type:"Dinner",emoji:"🥩",desc:"Underrated lean protein. Tastes fancier than it is.",
+     ingredients:[{item:"Pork tenderloin",l:"240g",g:"180g"},{item:"Baby potatoes",l:"250g",g:"150g"},{item:"Broccoli or green beans",l:"150g",g:"200g"},{item:"Olive oil",l:"15ml",g:"8ml"},{item:"Garlic, rosemary, salt, pepper",l:"to taste",g:"to taste"}],
+     note:"375F oven, 25-30 min. One pan. Season everything and roast together.",pin:"pork+tenderloin+roasted+potatoes+sheet+pan+recipe",cal:{l:760,g:490},pro:{l:50,g:40}},
+  ]},
+  {day:"Friday",tag:"Rest Day",meals:[
+    {name:"Smoothie + Eggs",type:"Breakfast",emoji:"🥤",desc:"Good for a long work day. Drink breakfast if you're short on time.",
+     ingredients:[{item:"Whey protein powder",l:"2 scoops 60g",g:"1.5 scoops 45g"},{item:"Banana",l:"1 large",g:"1 medium"},{item:"Peanut butter",l:"30g",g:"15g"},{item:"Whole milk",l:"300ml",g:"250ml skim"},{item:"Scrambled eggs on side",l:"2 eggs",g:"2 eggs"}],
+     note:"Blend everything but the eggs. Quick and filling before a long shift.",pin:"protein+peanut+butter+banana+smoothie+recipe",cal:{l:820,g:540},pro:{l:60,g:52}},
+    {name:"Tuna Melt or Wrap",type:"Lunch",emoji:"🥫",desc:"Cheap, fast, high protein. One of the best value proteins you can buy.",
+     ingredients:[{item:"Canned tuna in water drained",l:"200g",g:"180g"},{item:"Whole grain bread or tortilla",l:"2 slices or 1 large",g:"1 slice or 1 small"},{item:"Light mayo",l:"20g",g:"10g"},{item:"Shredded cheese",l:"30g",g:"15g"},{item:"Lettuce tomato pickles",l:"as much as you want",g:"as much as you want"}],
+     note:"Toast into a melt or roll it into a wrap cold. Either way works.",pin:"tuna+melt+sandwich+healthy+high+protein+recipe",cal:{l:580,g:380},pro:{l:47,g:42}},
+    {name:"Chicken Burrito Bowl",type:"Dinner",emoji:"🌯",desc:"Friday treat meal. Same as Chipotle but cheaper and better macros.",
+     ingredients:[{item:"Chicken breast grilled",l:"220g",g:"180g"},{item:"White rice (cooked)",l:"250g",g:"130g"},{item:"Black beans",l:"90g",g:"90g"},{item:"Corn salsa",l:"60g",g:"60g"},{item:"Sour cream",l:"40g",g:"skip or 15g"},{item:"Cheese + guacamole",l:"30g cheese + 50g guac",g:"15g cheese skip guac"},{item:"Romaine lettuce base",l:"big bed",g:"big bed"}],
+     note:"GF cuts the rice and sour cream but it still feels like a treat meal.",pin:"chicken+burrito+bowl+healthy+chipotle+recipe",cal:{l:890,g:560},pro:{l:55,g:46}},
+  ]},
+  {day:"Saturday",tag:"Rest Day",meals:[
+    {name:"Cottage Cheese Bowl",type:"Breakfast",emoji:"🫙",desc:"Underrated breakfast. High casein protein keeps you full for hours.",
+     ingredients:[{item:"Cottage cheese 2%",l:"300g",g:"250g"},{item:"Granola",l:"50g",g:"20g"},{item:"Sliced banana + berries",l:"150g total",g:"150g total"},{item:"Honey drizzle",l:"15g",g:"skip"},{item:"Cinnamon",l:"to taste",g:"to taste"}],
+     note:"No cooking required. Perfect lazy Saturday morning.",pin:"cottage+cheese+bowl+breakfast+healthy+recipe",cal:{l:620,g:390},pro:{l:40,g:34}},
+    {name:"Chicken Caesar Salad",type:"Lunch",emoji:"🥗",desc:"Actually filling when you use enough protein. Don't skimp on the chicken.",
+     ingredients:[{item:"Grilled chicken breast",l:"220g",g:"180g"},{item:"Romaine lettuce",l:"big bowl ~150g",g:"big bowl ~150g"},{item:"Caesar dressing light",l:"40ml",g:"25ml"},{item:"Parmesan",l:"25g",g:"15g"},{item:"Whole grain croutons",l:"40g",g:"20g"}],
+     note:"Prep the chicken ahead. This comes together in 5 minutes.",pin:"grilled+chicken+caesar+salad+healthy+recipe",cal:{l:640,g:430},pro:{l:51,g:44}},
+    {name:"Homemade Burgers",type:"Dinner",emoji:"🍔",desc:"Saturday dinner. Make it a good one. These are real burgers not diet food.",
+     ingredients:[{item:"Ground beef 80/20",l:"250g patty",g:"180g patty"},{item:"Whole grain bun",l:"1 bun",g:"1 bun or lettuce wrap"},{item:"Cheese slice",l:"1 slice 25g",g:"1 slice 25g"},{item:"Tomato lettuce onion pickles",l:"stack it",g:"stack it"},{item:"Ketchup + mustard",l:"to taste",g:"to taste, skip mayo"},{item:"Sweet potato fries",l:"200g",g:"100g"}],
+     note:"GF can do lettuce wrap bun to save ~150 cal. Sweet potato fries in air fryer.",pin:"homemade+beef+burger+sweet+potato+fries+recipe",cal:{l:870,g:580},pro:{l:50,g:40}},
+  ]},
+];
+
+const S = {
+  bg:"#070d18",card:"#0f1a2e",card2:"#162030",
+  border:"rgba(255,255,255,0.07)",txt:"#e8f0ff",muted:"#4d6080",
+  lClr:"#4da6ff",gClr:"#ff6eb4",green:"#22c55e"
+};
+const btn = (extra={}) => ({border:"none",cursor:"pointer",fontFamily:"inherit",...extra});
+
+
+function App() {
+  const today = new Date().getDay();
+
+  // ── Week key: anchored to Sunday so each calendar week gets a unique key ──
+  const getWeekKey = () => {
+    const now = new Date();
+    const sun = new Date(now);
+    sun.setDate(now.getDate() - now.getDay());
+    return `${sun.getFullYear()}-${String(sun.getMonth()+1).padStart(2,'0')}-${String(sun.getDate()).padStart(2,'0')}`;
+  };
+  const weekKey = getWeekKey();
+
+  const [tab,setTab]       = useState("workouts");
+  const [scr,setScr]       = useState("home");
+  const [vDay,setVDay]     = useState(today);
+  const [vEx,setVEx]       = useState({wk:null,i:0});
+  const [wts,setWts]       = useState(DW);
+  const [bw,setBw]         = useState({l:155,g:185});
+  const [nms,setNms]       = useState({l:"Logan",g:"Partner"});
+  const [weekChk,setWC]    = useState({}); // {dayNum: {exId: {pk: [bool,...]}}}
+  const [loading,setLoad]  = useState(true);
+  const [statsOpen,setSO]  = useState(false);
+  const [wtMod,setWM]      = useState(null);
+  const [editS,setES]      = useState(null);
+  const [demoOpen,setDO]   = useState(false);
+  const [mealDay,setMD]    = useState(today);
+  const [openMeal,setOM]   = useState(null);
+
+  useEffect(()=>{
+    (async()=>{
+      if(window.storage){
+        try{const r=await window.storage.get("lft-wts");if(r)setWts(p=>({...DW,...JSON.parse(r.value)}));}catch(e){}
+        try{const r=await window.storage.get("lft-meta");if(r){const m=JSON.parse(r.value);if(m.bw)setBw(m.bw);if(m.nms)setNms(m.nms);}}catch(e){}
+        try{const r=await window.storage.get("lft-chk-"+weekKey);if(r)setWC(JSON.parse(r.value));}catch(e){}
+      }
+      setLoad(false);
+    })();
+  },[]);
+
+  const saveWts  = async w=>{if(window.storage)try{await window.storage.set("lft-wts",JSON.stringify(w));}catch(e){}};
+  const saveMeta = async(b,n)=>{if(window.storage)try{await window.storage.set("lft-meta",JSON.stringify({bw:b,nms:n}));}catch(e){}};
+  const saveChk  = async wc=>{if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}};
+
+  const tog = (id,pk,si)=>setWC(prev=>{
+    const day=prev[vDay]||{}, ex=day[id]||{}, arr=[...(ex[pk]||[])];
+    arr[si]=!arr[si];
+    const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:arr}}};
+    saveChk(nw); return nw;
+  });
+  const chkAll = (id,pk,n,v)=>setWC(prev=>{
+    const day=prev[vDay]||{}, ex=day[id]||{};
+    const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:Array(n).fill(v)}}};
+    saveChk(nw); return nw;
+  });
+
+  // Current workout day helpers
+  const gc       = (id,pk)=>weekChk[vDay]?.[id]?.[pk]||[];
+  const gdn      = (id,pk)=>gc(id,pk).filter(Boolean).length;
+  // Any day helpers (for home screen)
+  const gcDay    = (day,id,pk)=>weekChk[day]?.[id]?.[pk]||[];
+  const gdnDay   = (day,id,pk)=>gcDay(day,id,pk).filter(Boolean).length;
+
+  const gAll     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+e.l.s+e.g.s,0);
+  const gTot     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdn(e.id,"l")+gdn(e.id,"g"),0);
+  const gTotDay  = (wk,day)=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdnDay(day,e.id,"l")+gdnDay(day,e.id,"g"),0);
+
+  if(loading)return(<div style={{background:S.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:S.lClr,fontSize:28}}>💪</div></div>);
+
+  const BottomNav=()=>(
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",zIndex:20,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {[{id:"workouts",icon:"💪",label:"Workouts"},{id:"meals",icon:"🍽️",label:"Meals"}].map(t=>(
+        <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"12px 0 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",color:tab===t.id?S.lClr:S.muted})}>
+          <span style={{fontSize:20}}>{t.icon}</span>
+          <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.04em"}}>{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  // ── MEALS ──────────────────────────────────────────────────────────────────
+  if(tab==="meals"){
+    const dayData=MEALS[mealDay];
+    return(
+      <div style={{background:S.bg,minHeight:"100vh",color:S.txt,fontFamily:"'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif",paddingBottom:80}}>
+        <div style={{background:S.card,borderBottom:`1px solid ${S.border}`,padding:"36px 20px 16px",position:"sticky",top:0,zIndex:10}}>
+          <div style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px",marginBottom:4}}>🍽️ Meal Plan</div>
+          <div style={{fontSize:12,color:S.muted,marginBottom:14}}>Same meal · different portions</div>
+          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+            {MEALS.map((d,i)=>{
+              const isT=i===today;
+              return(
+                <button key={i} onClick={()=>{setMD(i);setOM(null);}} style={btn({flexShrink:0,padding:"7px 14px",borderRadius:99,background:mealDay===i?(isT?S.lClr:"#1e3a5f"):"rgba(255,255,255,0.04)",color:mealDay===i?"#fff":S.muted,fontWeight:700,fontSize:12,border:`1px solid ${mealDay===i?(isT?S.lClr:"#2a5580"):"transparent"}`})}>
+                  {d.day.slice(0,3)}{isT&&<span style={{marginLeft:4,fontSize:9}}>●</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{padding:"14px 16px 4px",display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:18,fontWeight:800}}>{dayData.day}</div>
+          <div style={{fontSize:11,background:"rgba(255,255,255,0.06)",padding:"3px 10px",borderRadius:99,color:S.muted,fontWeight:600}}>{dayData.tag}</div>
+        </div>
+        <div style={{padding:"4px 16px 10px",display:"flex",gap:10,alignItems:"center"}}>
+          {[{pk:"l",c:S.lClr},{pk:"g",c:S.gClr}].map(({pk,c})=>(
+            <div key={pk} style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:c}}/>
+              <span style={{fontSize:11,color:S.muted,fontWeight:600}}>{nms[pk]}</span>
+            </div>
+          ))}
+          <span style={{fontSize:11,color:S.muted,marginLeft:"auto"}}>Tap a meal to expand</span>
+        </div>
+
+        <div style={{padding:"0 16px",display:"flex",flexDirection:"column",gap:12}}>
+          {dayData.meals.map((meal,mi)=>{
+            const isOpen=openMeal===mi;
+            const isPrepMeal=meal.cal.l===0;
+            return(
+              <div key={mi} style={{background:S.card,borderRadius:20,overflow:"hidden",border:`1px solid ${S.border}`}}>
+                <button onClick={()=>setOM(isOpen?null:mi)} style={btn({width:"100%",padding:"16px 18px",display:"flex",alignItems:"center",gap:14,background:"none",color:S.txt,textAlign:"left"})}>
+                  <div style={{fontSize:32,lineHeight:1}}>{meal.emoji}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,color:S.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{meal.type}</div>
+                    <div style={{fontSize:16,fontWeight:800,color:"#d0e8ff"}}>{meal.name}</div>
+                    <div style={{fontSize:12,color:S.muted,marginTop:2}}>{meal.desc}</div>
+                  </div>
+                  {!isPrepMeal&&(
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:11,color:S.lClr,fontWeight:700}}>{meal.cal.l} cal</div>
+                      <div style={{fontSize:11,color:S.gClr,fontWeight:700}}>{meal.cal.g} cal</div>
+                    </div>
+                  )}
+                  <span style={{color:S.muted,fontSize:16,marginLeft:4,display:"block",transform:isOpen?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>⌄</span>
+                </button>
+
+                {isOpen&&(
+                  <div style={{borderTop:`1px solid ${S.border}`,padding:"16px 18px 18px"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:S.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Ingredients and Portions</div>
+                    <div style={{borderRadius:12,overflow:"hidden",border:`1px solid ${S.border}`,marginBottom:14}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 90px 90px",background:S.card2,padding:"8px 12px",gap:8}}>
+                        <span style={{fontSize:11,fontWeight:700,color:S.muted}}>Ingredient</span>
+                        <span style={{fontSize:11,fontWeight:700,color:S.lClr,textAlign:"center"}}>{nms.l}</span>
+                        <span style={{fontSize:11,fontWeight:700,color:S.gClr,textAlign:"center"}}>{nms.g}</span>
+                      </div>
+                      {meal.ingredients.map((ing,ii)=>(
+                        <div key={ii} style={{display:"grid",gridTemplateColumns:"1fr 90px 90px",padding:"9px 12px",gap:8,background:ii%2===0?"transparent":"rgba(255,255,255,0.02)",borderTop:`1px solid ${S.border}`}}>
+                          <span style={{fontSize:12,color:"#a0b8d8"}}>{ing.item}</span>
+                          <span style={{fontSize:12,color:"#7ab8ff",textAlign:"center",fontWeight:600}}>{ing.l}</span>
+                          <span style={{fontSize:12,color:"#ff9dd1",textAlign:"center",fontWeight:600}}>{ing.g}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {meal.note&&(
+                      <div style={{background:"rgba(77,166,255,0.08)",border:"1px solid rgba(77,166,255,0.15)",borderRadius:12,padding:"10px 14px",marginBottom:14,fontSize:13,color:"#7ab8ff",lineHeight:1.5}}>
+                        💡 {meal.note}
+                      </div>
+                    )}
+
+                    {!isPrepMeal&&(
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+                        {[{pk:"l",c:S.lClr},{pk:"g",c:S.gClr}].map(({pk,c})=>(
+                          <div key={pk} style={{background:S.card2,borderRadius:12,padding:"10px 12px",border:`1px solid ${c}22`}}>
+                            <div style={{fontSize:11,color:c,fontWeight:700,marginBottom:4}}>{nms[pk]}</div>
+                            <div style={{fontSize:15,fontWeight:800,color:S.txt}}>{meal.cal[pk]} <span style={{fontSize:11,fontWeight:400,color:S.muted}}>cal</span></div>
+                            <div style={{fontSize:12,color:S.muted,marginTop:2}}>~{meal.pro[pk]}g protein</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <a href={`https://www.pinterest.com/search/pins/?q=${meal.pin}`} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"rgba(230,0,35,0.1)",border:"1px solid rgba(230,0,35,0.25)",borderRadius:12,padding:"11px 16px",textDecoration:"none"}}>
+                      <span style={{fontSize:18}}>📌</span>
+                      <span style={{color:"#ff6b6b",fontWeight:700,fontSize:13}}>Find recipes on Pinterest</span>
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <BottomNav/>
+      </div>
+    );
+  }
+
+
+  // ── HOME ───────────────────────────────────────────────────────────────────
+  if(scr==="home"){
+    const todayWk=SCHED[today];
+    return(
+      <div style={{background:S.bg,minHeight:"100vh",color:S.txt,fontFamily:"'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif",paddingBottom:80}}>
+        <div style={{background:S.card,borderBottom:`1px solid ${S.border}`,padding:"36px 20px 18px",position:"sticky",top:0,zIndex:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+            <div>
+              <div style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px"}}>💪 LiftTogether</div>
+              <div style={{fontSize:12,color:S.muted,marginTop:3}}>{DNAME[today]} · {todayWk?WO[todayWk].name+" today":"Rest day today"}</div>
+            </div>
+            <button onClick={()=>{setES({nms:{...nms},bw:{...bw}});setSO(true);}} style={btn({background:S.card2,color:"#8ba8d0",padding:"8px 14px",borderRadius:12,fontSize:12,fontWeight:700})}>⚙ Stats</button>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            {[{pk:"l",c:S.lClr},{pk:"g",c:S.gClr}].map(({pk,c})=>(
+              <div key={pk} style={{flex:1,background:"rgba(255,255,255,0.04)",borderRadius:14,padding:"10px 14px",border:`1px solid ${c}28`}}>
+                <div style={{fontSize:11,color:S.muted,marginBottom:2}}>{nms[pk]}</div>
+                <div style={{fontSize:17,fontWeight:800,color:c}}>{bw[pk]} lbs</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{padding:"16px 16px 32px",display:"flex",flexDirection:"column",gap:10}}>
+          {[1,2,3,4,5,6,0].map(day=>{
+            const wk=SCHED[day], isT=day===today;
+            const tot=gAll(wk), dn=gTotDay(wk,day), pct=tot>0?dn/tot:0;
+            const allDn=wk&&tot>0&&dn===tot;
+            return(
+              <div
+                key={day}
+                onClick={()=>wk&&(setVDay(day),setScr("workout"))}
+                style={{
+                  background:isT?"linear-gradient(135deg,#0c2254,#0d1f42)":allDn?"rgba(34,197,94,0.06)":S.card,
+                  border:`1px solid ${allDn?"#22c55e88":isT?"#4da6ff44":S.border}`,
+                  borderRadius:18,padding:"16px 18px",display:"flex",alignItems:"center",gap:14,
+                  cursor:wk?"pointer":"default",opacity:!wk?0.35:1,
+                  boxShadow:allDn?"0 0 16px rgba(34,197,94,0.1)":isT?"0 0 24px rgba(77,166,255,0.12)":""
+                }}
+              >
+                <div style={{textAlign:"center",minWidth:40}}>
+                  <div style={{fontSize:11,fontWeight:800,color:allDn?"#4ade80":isT?S.lClr:S.muted,textTransform:"uppercase",letterSpacing:"0.08em"}}>{DSHRT[day]}</div>
+                  {isT&&<div style={{width:5,height:5,borderRadius:"50%",background:S.lClr,margin:"3px auto 0"}}/>}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  {wk?(
+                    <>
+                      <div style={{fontWeight:700,fontSize:15,color:allDn?"#4ade80":isT?"#d6eaff":S.txt}}>{WO[wk].name}</div>
+                      <div style={{fontSize:12,color:allDn?"#22c55e88":isT?"#6ea8d8":S.muted,marginTop:2}}>{WO[wk].sub}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                        <div style={{flex:1,height:4,background:"rgba(0,0,0,0.4)",borderRadius:99,overflow:"hidden"}}>
+                          <div style={{height:"100%",background:allDn?S.green:isT?S.lClr:WO[wk].clr,borderRadius:99,width:`${pct*100}%`,transition:"width 0.4s ease"}}/>
+                        </div>
+                        {dn>0&&<span style={{fontSize:11,color:allDn?"#4ade80":S.muted}}>{dn}/{tot}</span>}
+                      </div>
+                    </>
+                  ):(
+                    <div style={{color:"#2a3d55",fontWeight:600}}>Rest Day</div>
+                  )}
+                </div>
+                <div style={{fontSize:20,flexShrink:0}}>
+                  {allDn ? "✅" : wk ? <span style={{color:isT?S.lClr:"#1e3050",fontSize:18}}>›</span> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {statsOpen&&editS&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:50,display:"flex",alignItems:"flex-end"}}>
+            <div style={{background:S.card,width:"100%",borderRadius:"24px 24px 0 0",padding:"28px 20px 36px",border:`1px solid ${S.border}`}}>
+              <div style={{fontSize:19,fontWeight:800,marginBottom:22}}>👤 Update Stats</div>
+              {[{pk:"l",c:S.lClr,lb:"Your"},{pk:"g",c:S.gClr,lb:"Partner's"}].map(({pk,c,lb})=>(
+                <div key={pk} style={{marginBottom:18}}>
+                  <div style={{fontSize:11,color:c,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>{lb} Info</div>
+                  <input style={{background:S.card2,color:S.txt,width:"100%",borderRadius:12,padding:"11px 14px",fontSize:15,boxSizing:"border-box",border:`1px solid ${S.border}`,outline:"none",marginBottom:8}} placeholder="Name" value={editS.nms[pk]} onChange={e=>setES(p=>({...p,nms:{...p.nms,[pk]:e.target.value}}))}/>
+                  <input type="number" style={{background:S.card2,color:S.txt,width:"100%",borderRadius:12,padding:"11px 14px",fontSize:15,boxSizing:"border-box",border:`1px solid ${S.border}`,outline:"none"}} placeholder="Body weight (lbs)" value={editS.bw[pk]} onChange={e=>setES(p=>({...p,bw:{...p.bw,[pk]:e.target.value}}))}/>
+                </div>
+              ))}
+              <div style={{display:"flex",gap:12,marginTop:8}}>
+                <button onClick={()=>setSO(false)} style={btn({flex:1,background:S.card2,color:S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:15,border:`1px solid ${S.border}`})}>Cancel</button>
+                <button onClick={()=>{const nb={l:parseFloat(editS.bw.l)||bw.l,g:parseFloat(editS.bw.g)||bw.g};const nn={l:editS.nms.l||nms.l,g:editS.nms.g||nms.g};setBw(nb);setNms(nn);saveMeta(nb,nn);setSO(false);}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:14,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        <BottomNav/>
+      </div>
+    );
+  }
+
+  // ── WORKOUT GRID ───────────────────────────────────────────────────────────
+  if(scr==="workout"){
+    const wk=SCHED[vDay];
+    if(!wk){setScr("home");return null;}
+    const W=WO[wk],tot=gAll(wk),dn=gTot(wk);
+    return(
+      <div style={{background:S.bg,minHeight:"100vh",color:S.txt,fontFamily:"'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif",paddingBottom:80}}>
+        <div style={{background:S.card,borderBottom:`1px solid ${S.border}`,padding:"36px 20px 16px",position:"sticky",top:0,zIndex:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+            <button onClick={()=>setScr("home")} style={btn({color:S.muted,fontSize:26,lineHeight:1,background:"none"})}>‹</button>
+            <div>
+              <div style={{fontSize:20,fontWeight:800,letterSpacing:"-0.3px"}}>{W.name}</div>
+              <div style={{fontSize:12,color:S.muted}}>{W.sub} · {DNAME[vDay]}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{flex:1,height:6,background:"rgba(255,255,255,0.05)",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",background:W.clr,borderRadius:99,width:`${tot>0?(dn/tot)*100:0}%`,transition:"width 0.4s ease"}}/></div>
+            <span style={{fontSize:12,color:S.muted,minWidth:40,textAlign:"right"}}>{dn}/{tot}</span>
+          </div>
+        </div>
+        <div style={{padding:16,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          {W.exercises.map((ex,i)=>{
+            const lc=gc(ex.id,"l"),gg=gc(ex.id,"g"),allDn=gdn(ex.id,"l")+gdn(ex.id,"g")===ex.l.s+ex.g.s;
+            return(
+              <button key={ex.id} onClick={()=>{setVEx({wk,i});setDO(false);setScr("exercise");}} style={btn({background:allDn?"rgba(34,197,94,0.1)":S.card,border:`1px solid ${allDn?"#22c55e44":S.border}`,borderRadius:20,padding:"14px 8px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:132,color:S.txt})}>
+                <div style={{fontSize:32}}>{ex.icon}</div>
+                <div style={{fontSize:11,fontWeight:700,textAlign:"center",lineHeight:1.3,color:allDn?"#4ade80":"#c8daf0",marginTop:4}}>{ex.short}</div>
+                <div style={{marginTop:"auto",display:"flex",flexDirection:"column",gap:4,alignItems:"center",paddingTop:8}}>
+                  <div style={{display:"flex",gap:4}}>{Array.from({length:ex.l.s}).map((_,si)=>(<div key={si} style={{width:7,height:7,borderRadius:"50%",background:lc[si]?S.lClr:"#162030"}}/>))}</div>
+                  <div style={{display:"flex",gap:4}}>{Array.from({length:ex.g.s}).map((_,si)=>(<div key={si} style={{width:7,height:7,borderRadius:"50%",background:gg[si]?S.gClr:"#162030"}}/>))}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <BottomNav/>
+      </div>
+    );
+  }
+
+
+  // ── EXERCISE DETAIL ────────────────────────────────────────────────────────
+  if(scr==="exercise"){
+    const {wk,i}=vEx,W=WO[wk],ex=W.exercises[i],w=wts[ex.id]||{l:0,g:0};
+    const dm=DEMO[ex.id];
+
+    const pBox=(pk,clr,data)=>{
+      const {s,r,note}=data,wt=w[pk],arr=gc(ex.id,pk),dn=arr.filter(Boolean).length;
+      const allD=dn===s,someD=dn>0&&dn<s;
+      return(
+        <div style={{background:S.card,borderRadius:22,padding:18,border:`1px solid ${clr}22`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:10,height:10,borderRadius:"50%",background:clr,boxShadow:`0 0 8px ${clr}88`}}/>
+              <span style={{fontWeight:800,fontSize:15,color:clr}}>{nms[pk]}</span>
+            </div>
+            <span style={{fontSize:12,color:S.muted,background:S.card2,padding:"3px 10px",borderRadius:99}}>{dn}/{s} done</span>
+          </div>
+          <div style={{display:"flex",gap:14}}>
+            <div style={{background:S.card2,borderRadius:16,padding:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:92,flexShrink:0,border:`1px solid ${S.border}`}}>
+              <div style={{fontSize:30,marginBottom:6}}>{ex.icon}</div>
+              <div style={{fontSize:11,fontWeight:700,textAlign:"center",color:"#a0b8d8",lineHeight:1.3}}>{ex.short}</div>
+              <div style={{fontSize:16,fontWeight:800,color:clr,marginTop:10}}>{wt} lbs</div>
+              <button onClick={()=>setWM({id:ex.id,pk,val:String(wt)})} style={btn({fontSize:11,color:S.muted,marginTop:5,background:"none",padding:"2px 0"})}>✏️ edit</button>
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <button onClick={()=>chkAll(ex.id,pk,s,!allD)} style={btn({display:"flex",alignItems:"center",gap:9,marginBottom:10,width:"100%",padding:0,background:"none"})}>
+                <div style={{width:22,height:22,borderRadius:7,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:allD?clr:someD?`${clr}22`:"transparent",border:`2px solid ${allD||someD?clr:S.muted}`,transition:"all 0.2s"}}>
+                  {allD&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
+                  {someD&&<span style={{color:clr,fontSize:13,fontWeight:900,lineHeight:1}}>–</span>}
+                </div>
+                <span style={{fontSize:12,color:S.muted,fontWeight:700}}>All {s} sets</span>
+              </button>
+              {Array.from({length:s}).map((_,si)=>{
+                const done=arr[si]||false;
+                return(
+                  <button key={si} onClick={()=>tog(ex.id,pk,si)} style={btn({display:"flex",alignItems:"center",gap:10,width:"100%",background:done?`${clr}18`:S.card2,border:`1px solid ${done?clr+"44":S.border}`,borderRadius:13,padding:"9px 12px",marginBottom:7,color:S.txt,transition:"all 0.15s"})}>
+                    <div style={{width:22,height:22,borderRadius:7,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:done?clr:"transparent",border:`2px solid ${done?clr:S.muted}`,transition:"all 0.15s"}}>
+                      {done&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
+                    </div>
+                    <div style={{textAlign:"left"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:done?S.txt:"#7a9abf"}}>Set {si+1}</div>
+                      <div style={{fontSize:11,color:S.muted,marginTop:1}}>{r}{note?` ${note}`:""} reps · {wt} lbs</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    return(
+      <div style={{background:S.bg,minHeight:"100vh",color:S.txt,fontFamily:"'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif",paddingBottom:100}}>
+        <div style={{background:S.card,borderBottom:`1px solid ${S.border}`,padding:"36px 20px 16px",position:"sticky",top:0,zIndex:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <button onClick={()=>{setScr("workout");setWM(null);}} style={btn({color:S.muted,fontSize:26,lineHeight:1,background:"none"})}>‹</button>
+            <div style={{fontSize:28}}>{ex.icon}</div>
+            <div>
+              <div style={{fontSize:20,fontWeight:800,letterSpacing:"-0.3px"}}>{ex.name}</div>
+              <div style={{fontSize:12,color:S.muted}}>{W.name} · {DNAME[vDay]}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px 4px"}}>
+          <button onClick={()=>{setVEx({wk,i:(i-1+W.exercises.length)%W.exercises.length});setDO(false);}} style={btn({background:S.card,color:S.muted,padding:"8px 18px",borderRadius:12,fontSize:13,fontWeight:600,border:`1px solid ${S.border}`})}>&#8249; Prev</button>
+          <span style={{fontSize:12,color:S.muted}}>{i+1} / {W.exercises.length}</span>
+          <button onClick={()=>{setVEx({wk,i:(i+1)%W.exercises.length});setDO(false);}} style={btn({background:S.card,color:S.muted,padding:"8px 18px",borderRadius:12,fontSize:13,fontWeight:600,border:`1px solid ${S.border}`})}>Next &#8250;</button>
+        </div>
+
+        <div style={{padding:"12px 16px 0",display:"flex",flexDirection:"column",gap:14}}>
+          {pBox("l",S.lClr,ex.l)}
+          {pBox("g",S.gClr,ex.g)}
+        </div>
+
+        {dm&&(
+          <div style={{padding:"12px 16px 0"}}>
+            <button onClick={()=>setDO(p=>!p)} style={btn({width:"100%",background:S.card,borderRadius:18,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${demoOpen?"#4da6ff44":S.border}`,color:S.txt})}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>📺</span>
+                <div style={{textAlign:"left"}}>
+                  <div style={{fontSize:14,fontWeight:700,color:"#c8daf0"}}>How To Do This</div>
+                  <div style={{fontSize:11,color:S.muted,marginTop:1}}>{dm.equip}</div>
+                </div>
+              </div>
+              <span style={{color:S.muted,fontSize:18,display:"block",transform:demoOpen?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>&#8964;</span>
+            </button>
+            {demoOpen&&(
+              <div style={{background:S.card,borderRadius:"0 0 18px 18px",marginTop:-8,padding:"8px 18px 18px",border:"1px solid rgba(77,166,255,0.13)",borderTop:"none"}}>
+                <div style={{height:1,background:S.border,marginBottom:14}}/>
+                {dm.cues.map((cue,ci)=>(
+                  <div key={ci} style={{display:"flex",gap:12,marginBottom:10,alignItems:"flex-start"}}>
+                    <div style={{width:22,height:22,borderRadius:99,background:"#0d2040",border:"1px solid rgba(77,166,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+                      <span style={{fontSize:10,fontWeight:800,color:"#4da6ff"}}>{ci+1}</span>
+                    </div>
+                    <span style={{fontSize:13,color:"#a0b8d8",lineHeight:1.5}}>{cue}</span>
+                  </div>
+                ))}
+                <a href={`https://www.youtube.com/results?search_query=${dm.yt}`} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"rgba(255,0,0,0.1)",border:"1px solid rgba(255,0,0,0.2)",borderRadius:12,padding:"11px 16px",marginTop:6,textDecoration:"none"}}>
+                  <span style={{fontSize:18}}>&#9654;&#65039;</span>
+                  <span style={{color:"#ff6b6b",fontWeight:700,fontSize:13}}>Watch on YouTube</span>
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {wtMod&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:50,display:"flex",alignItems:"flex-end"}}>
+            <div style={{background:S.card,width:"100%",borderRadius:"24px 24px 0 0",padding:"28px 20px 36px",border:`1px solid ${S.border}`}}>
+              <div style={{fontSize:19,fontWeight:800,marginBottom:4}}>{ex.name}</div>
+              <div style={{fontSize:13,color:S.muted,marginBottom:18}}>Update working weight for {nms[wtMod.pk]}</div>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                <button onClick={()=>setWM(p=>({...p,val:String(Math.max(0,parseFloat(p.val||0)-5))}))} style={btn({background:S.card2,color:S.txt,width:44,height:44,borderRadius:12,fontSize:20,fontWeight:700,border:`1px solid ${S.border}`,flexShrink:0})}>&#8722;</button>
+                <input type="number" style={{flex:1,background:S.card2,color:S.txt,borderRadius:14,padding:"14px",fontSize:24,textAlign:"center",fontWeight:900,boxSizing:"border-box",border:`1px solid ${S.border}`,outline:"none"}} value={wtMod.val} onChange={e=>setWM(p=>({...p,val:e.target.value}))} autoFocus/>
+                <button onClick={()=>setWM(p=>({...p,val:String(parseFloat(p.val||0)+5)}))} style={btn({background:S.card2,color:S.txt,width:44,height:44,borderRadius:12,fontSize:20,fontWeight:700,border:`1px solid ${S.border}`,flexShrink:0})}>+</button>
+              </div>
+              <div style={{fontSize:12,color:S.muted,textAlign:"center",marginBottom:18}}>lbs · use +5 / -5 for quick adjustments</div>
+              <div style={{display:"flex",gap:12}}>
+                <button onClick={()=>setWM(null)} style={btn({flex:1,background:S.card2,color:S.muted,padding:15,borderRadius:14,fontWeight:700,fontSize:15,border:`1px solid ${S.border}`})}>Cancel</button>
+                <button onClick={()=>{const num=parseFloat(wtMod.val);if(!isNaN(num)&&num>0){const nw={...wts,[wtMod.id]:{...wts[wtMod.id],[wtMod.pk]:num}};setWts(nw);saveWts(nw);}setWM(null);}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:15,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        <BottomNav/>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
+  </script>
+</body>
+</html>

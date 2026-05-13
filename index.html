@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>LiftTogether</title>
   <style>
@@ -9,6 +12,7 @@
     body { background:#070d18; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; }
+    ::-webkit-scrollbar { display:none; }
   </style>
 </head>
 <body>
@@ -19,6 +23,7 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
+    // localStorage adapter — data persists through refreshes and app updates
     window.storage = {
       get: async (key) => {
         try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; }
@@ -225,6 +230,9 @@ function App() {
   const [mealDay,setMD]    = useState(today);
   const [openMeal,setOM]   = useState(null);
   const [bwHist,setBWH]    = useState({l:[],g:[]});
+  const [fbPopup,setFB]    = useState(null);  // null | {wk,day,answers:{l:{feel,sets,reps},g:{feel,sets,reps}},step}
+  const [fbGiven,setFBG]   = useState({});    // {weekKey_day: true}
+  const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
 
   useEffect(()=>{
     (async()=>{
@@ -233,6 +241,8 @@ function App() {
         try{const r=await window.storage.get("lft-meta");if(r){const m=JSON.parse(r.value);if(m.bw)setBw(m.bw);if(m.nms)setNms(m.nms);}}catch(e){}
         try{const r=await window.storage.get("lft-chk-"+weekKey);if(r)setWC(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-bwhist");if(r)setBWH(JSON.parse(r.value));}catch(e){}
+        try{const r=await window.storage.get("lft-fbgiven");if(r)setFBG(JSON.parse(r.value));}catch(e){}
+        try{const r=await window.storage.get("lft-po");if(r)setPO(JSON.parse(r.value));}catch(e){}
       }
       setLoad(false);
     })();
@@ -241,6 +251,8 @@ function App() {
   const saveWts  = async w=>{if(window.storage)try{await window.storage.set("lft-wts",JSON.stringify(w));}catch(e){}};
   const saveMeta = async(b,n)=>{if(window.storage)try{await window.storage.set("lft-meta",JSON.stringify({bw:b,nms:n}));}catch(e){}};
   const saveBWH  = async h=>{if(window.storage)try{await window.storage.set("lft-bwhist",JSON.stringify(h));}catch(e){}};
+  const saveFBG  = async d=>{if(window.storage)try{await window.storage.set("lft-fbgiven",JSON.stringify(d));}catch(e){}};
+  const savePO   = async d=>{if(window.storage)try{await window.storage.set("lft-po",JSON.stringify(d));}catch(e){}};
   const saveChk  = async wc=>{if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}};
 
   const tog = (id,pk,si)=>setWC(prev=>{
@@ -266,12 +278,223 @@ function App() {
   const gTot     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdn(e.id,"l")+gdn(e.id,"g"),0);
   const gTotDay  = (wk,day)=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdnDay(day,e.id,"l")+gdnDay(day,e.id,"g"),0);
 
+  // Trigger feedback popup when a workout day is fully completed
+  useEffect(()=>{
+    if(scr!=="exercise"&&scr!=="workout") return;
+    const wk=SCHED[vDay]; if(!wk) return;
+    const tot=gAll(wk), dn=gTotDay(wk,vDay);
+    const fbKey=weekKey+"_"+vDay;
+    if(tot>0 && dn===tot && !fbGiven[fbKey]){
+      setFB({wk,day:vDay,answers:{l:{feel:null,sets:null,reps:null},g:{feel:null,sets:null,reps:null}},step:0});
+    }
+  },[weekChk]);
+
+  // Apply PO adjustments from poData to wts
+  const getEffectiveWt = (id,pk) => {
+    const key=id+"_"+pk;
+    return poData[key]?.pendingWt ?? wts[id]?.[pk] ?? 0;
+  };
+
+  // Compute PO recommendation after feedback
+  const applyFeedback = (wk, answers) => {
+    const today = new Date().toISOString().slice(0,10);
+    const newPO = {...poData};
+    WO[wk].exercises.forEach(ex => {
+      ["l","g"].forEach(pk => {
+        const key = ex.id+"_"+pk;
+        const ans = answers[pk];
+        const curWt = wts[ex.id]?.[pk] || 0;
+        const hist = newPO[key]?.history || [];
+        let newWt = curWt, newSets = null, newReps = null, nextDate = null;
+        const twoWeeks = new Date(); twoWeeks.setDate(twoWeeks.getDate()+14);
+        const oneWeek  = new Date(); oneWeek.setDate(oneWeek.getDate()+7);
+        if(pk==="l"){
+          // Logan: muscle/weight gain — weight-focused
+          if(ans.feel==="light" && ans.reps==="easy"){
+            newWt = curWt + 5;
+            nextDate = today;
+          } else if(ans.feel==="right" && ans.reps!=="hard"){
+            newWt = curWt + 5;
+            nextDate = twoWeeks.toISOString().slice(0,10);
+          } else if(ans.feel==="heavy" || ans.reps==="hard"){
+            newWt = curWt; // hold
+            nextDate = twoWeeks.toISOString().slice(0,10);
+          }
+          // sets feedback: Logan keeps sets (volume = muscle)
+        } else {
+          // GF: weight loss — rep-focused, adjust sets smartly
+          if(ans.feel==="light" && ans.reps==="easy"){
+            newWt = curWt + 2.5;
+            nextDate = today;
+          } else if(ans.feel==="right" && ans.reps!=="hard"){
+            newReps = (ex.g.r || 12) + 1;
+            nextDate = twoWeeks.toISOString().slice(0,10);
+          } else if(ans.feel==="heavy" || ans.reps==="hard"){
+            newWt = Math.max(curWt - 5, 5);
+            nextDate = today;
+          }
+          if(ans.sets==="toomany"){
+            // Drop 1 set, add 2 reps — keeps calorie burn, reduces fatigue
+            newSets = Math.max((ex.g.s || 3) - 1, 2);
+            newReps = (ex.g.r || 12) + 2;
+            nextDate = today;
+          } else if(ans.sets==="toofew"){
+            newSets = (ex.g.s || 3) + 1;
+            nextDate = today;
+          }
+        }
+        const updatedHist = newWt !== curWt ? [...hist, {date:today, wt:newWt}].slice(-50) : hist;
+        newPO[key] = {
+          pendingWt: newWt !== curWt ? newWt : (newPO[key]?.pendingWt ?? curWt),
+          pendingSets: newSets,
+          pendingReps: newReps,
+          nextDate,
+          history: updatedHist
+        };
+      });
+    });
+    setPO(newPO); savePO(newPO);
+    // If weight changed immediately, update wts too
+    const newWts = {...wts};
+    WO[wk].exercises.forEach(ex => {
+      ["l","g"].forEach(pk => {
+        const key=ex.id+"_"+pk;
+        const po=newPO[key];
+        if(po?.nextDate===today && po.pendingWt && po.pendingWt!==wts[ex.id]?.[pk]){
+          newWts[ex.id] = {...(newWts[ex.id]||{}), [pk]: po.pendingWt};
+        }
+      });
+    });
+    setWts(newWts); saveWts(newWts);
+  };
+
+
+  // ── FEEDBACK POPUP ────────────────────────────────────────────────────────
+  const FeedbackPopup = () => {
+    if(!fbPopup) return null;
+    const {wk, day, answers, step} = fbPopup;
+    const isDone = step === 2;
+
+    const setAns = (pk, field, val) => {
+      setFB(p=>({...p, answers:{...p.answers, [pk]:{...p.answers[pk],[field]:val}}}));
+    };
+
+    const BtnGroup = ({pk, field, opts}) => (
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
+        {opts.map(({val,label,clr})=>{
+          const sel = answers[pk][field]===val;
+          return(
+            <button key={val} onClick={()=>setAns(pk,field,val)}
+              style={btn({padding:"8px 14px",borderRadius:10,fontSize:13,fontWeight:700,
+                background:sel?(clr||S.lClr):"rgba(255,255,255,0.04)",
+                color:sel?"#fff":S.muted,
+                border:`1px solid ${sel?(clr||S.lClr):"rgba(255,255,255,0.08)"}`,
+                transition:"all 0.15s"})}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+    const PersonSection = ({pk, clr}) => {
+      const ans = answers[pk];
+      const allAnswered = ans.feel && ans.sets && ans.reps;
+      return(
+        <div style={{background:S.card2,borderRadius:16,padding:16,border:`1px solid ${clr}22`,marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+            <div style={{width:10,height:10,borderRadius:"50%",background:clr,boxShadow:`0 0 8px ${clr}88`}}/>
+            <span style={{fontWeight:800,fontSize:15,color:clr}}>{pk==="l"?nms.l:nms.g}</span>
+            {pk==="g"&&<span style={{fontSize:10,color:S.muted,marginLeft:4}}>weight loss focus</span>}
+            {pk==="l"&&<span style={{fontSize:10,color:S.muted,marginLeft:4}}>muscle gain focus</span>}
+          </div>
+
+          <div style={{fontSize:12,color:S.muted,fontWeight:700,marginBottom:4}}>How did it feel overall?</div>
+          <BtnGroup pk={pk} field="feel" opts={[
+            {val:"light",label:"😌 Light",clr:"#22c55e"},
+            {val:"right",label:"💪 Just Right",clr:clr},
+            {val:"heavy",label:"😤 Too Heavy",clr:"#ef4444"},
+          ]}/>
+
+          <div style={{fontSize:12,color:S.muted,fontWeight:700,marginTop:12,marginBottom:4}}>How were the sets?</div>
+          <BtnGroup pk={pk} field="sets" opts={[
+            {val:"toofew",label:"Too Few",clr:"#f59e0b"},
+            {val:"right",label:"Right Amount",clr:clr},
+            {val:"toomany",label:"Too Many",clr:"#ef4444"},
+          ]}/>
+
+          <div style={{fontSize:12,color:S.muted,fontWeight:700,marginTop:12,marginBottom:4}}>Could you complete all reps?</div>
+          <BtnGroup pk={pk} field="reps" opts={[
+            {val:"easy",label:"Easily",clr:"#22c55e"},
+            {val:"right",label:"Yes",clr:clr},
+            {val:"hard",label:"Struggled",clr:"#ef4444"},
+          ]}/>
+
+          {allAnswered && (
+            <div style={{marginTop:12,padding:"10px 12px",background:"rgba(255,255,255,0.04)",borderRadius:10,fontSize:12,color:"#a0b8d8",lineHeight:1.6}}>
+              {pk==="l" ? (
+                answers.l.feel==="light"&&answers.l.reps==="easy" ? "🔥 Nice — going up 5 lbs on all exercises next session" :
+                answers.l.feel==="heavy"||answers.l.reps==="hard" ? "🧘 Holding weight for another 2 weeks to lock in form" :
+                answers.l.sets==="toomany" ? "📌 Keeping your sets — volume is key for muscle gain" :
+                "✅ On track — weight increase scheduled in 2 weeks"
+              ) : (
+                answers.g.sets==="toomany" ? "⚖️ Dropping 1 set, adding 2 reps — same calorie burn, less fatigue" :
+                answers.g.feel==="heavy"||answers.g.reps==="hard" ? "🔽 Dropping weight 5 lbs to keep form and calorie burn clean" :
+                answers.g.feel==="light"&&answers.g.reps==="easy" ? "📈 Adding 2.5 lbs — progress without overloading the deficit" :
+                "✅ On track — adding a rep per set in 2 weeks"
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const bothDone = answers.l.feel&&answers.l.sets&&answers.l.reps&&answers.g.feel&&answers.g.sets&&answers.g.reps;
+
+    return(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"flex-end",overflowY:"auto"}}>
+        <div style={{background:S.card,width:"100%",borderRadius:"24px 24px 0 0",padding:"24px 20px 36px",border:`1px solid ${S.border}`,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{textAlign:"center",marginBottom:4}}>
+            <div style={{fontSize:22}}>🏁</div>
+            <div style={{fontSize:19,fontWeight:800,marginTop:4}}>Workout Complete!</div>
+            <div style={{fontSize:13,color:S.muted,marginTop:4}}>{WO[wk].name} · How did it go?</div>
+          </div>
+          <div style={{height:1,background:S.border,margin:"16px 0"}}/>
+
+          <PersonSection pk="l" clr={S.lClr}/>
+          <PersonSection pk="g" clr={S.gClr}/>
+
+          <div style={{display:"flex",gap:12,marginTop:4}}>
+            <button
+              onClick={()=>{
+                const fbKey=weekKey+"_"+fbPopup.day;
+                const nfbg={...fbGiven,[fbKey]:true};
+                setFBG(nfbg); saveFBG(nfbg); setFB(null);
+              }}
+              style={btn({flex:1,background:S.card2,color:S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:14,border:`1px solid ${S.border}`})}
+            >Skip</button>
+            <button
+              onClick={()=>{
+                if(!bothDone) return;
+                applyFeedback(fbPopup.wk, answers);
+                const fbKey=weekKey+"_"+fbPopup.day;
+                const nfbg={...fbGiven,[fbKey]:true};
+                setFBG(nfbg); saveFBG(nfbg); setFB(null);
+              }}
+              style={btn({flex:1,background:bothDone?S.lClr:"#1a2a40",color:bothDone?"#fff":S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:14,transition:"all 0.2s"})}
+            >{bothDone?"Save & Apply":"Answer All to Save"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if(loading)return(<div style={{background:S.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:S.lClr,fontSize:28}}>💪</div></div>);
 
   const BottomNav=()=>(
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",zIndex:20,paddingBottom:"env(safe-area-inset-bottom)"}}>
       {[{id:"workouts",icon:"💪",label:"Workouts"},{id:"progress",icon:"📈",label:"Progress"},{id:"meals",icon:"🍽️",label:"Meals"}].map(t=>(
-        <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"12px 0 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",color:tab===t.id?S.lClr:S.muted})}>
+        <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"16px 0 14px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:"none",color:tab===t.id?S.lClr:S.muted})}>
           <span style={{fontSize:20}}>{t.icon}</span>
           <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.04em"}}>{t.label}</span>
         </button>
@@ -396,7 +619,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.2
+          v2026.5.3
         </div>
 
         <BottomNav/>
@@ -608,7 +831,7 @@ function App() {
             </div>
           </div>
         )}
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.2</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.3</div>
         <BottomNav/>
       </div>
     );
@@ -781,6 +1004,7 @@ function App() {
             </div>
           </div>
         )}
+        <FeedbackPopup/>
         <BottomNav/>
       </div>
     );
@@ -788,6 +1012,7 @@ function App() {
 
   return null;
 }
+
 
 
     const root = ReactDOM.createRoot(document.getElementById('root'));

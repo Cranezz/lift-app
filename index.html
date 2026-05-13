@@ -19,7 +19,6 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // localStorage polyfill so the app saves data on GitHub Pages
     window.storage = {
       get: async (key) => {
         try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; }
@@ -225,6 +224,7 @@ function App() {
   const [demoOpen,setDO]   = useState(false);
   const [mealDay,setMD]    = useState(today);
   const [openMeal,setOM]   = useState(null);
+  const [bwHist,setBWH]    = useState({l:[],g:[]});
 
   useEffect(()=>{
     (async()=>{
@@ -232,6 +232,7 @@ function App() {
         try{const r=await window.storage.get("lft-wts");if(r)setWts(p=>({...DW,...JSON.parse(r.value)}));}catch(e){}
         try{const r=await window.storage.get("lft-meta");if(r){const m=JSON.parse(r.value);if(m.bw)setBw(m.bw);if(m.nms)setNms(m.nms);}}catch(e){}
         try{const r=await window.storage.get("lft-chk-"+weekKey);if(r)setWC(JSON.parse(r.value));}catch(e){}
+        try{const r=await window.storage.get("lft-bwhist");if(r)setBWH(JSON.parse(r.value));}catch(e){}
       }
       setLoad(false);
     })();
@@ -239,6 +240,7 @@ function App() {
 
   const saveWts  = async w=>{if(window.storage)try{await window.storage.set("lft-wts",JSON.stringify(w));}catch(e){}};
   const saveMeta = async(b,n)=>{if(window.storage)try{await window.storage.set("lft-meta",JSON.stringify({bw:b,nms:n}));}catch(e){}};
+  const saveBWH  = async h=>{if(window.storage)try{await window.storage.set("lft-bwhist",JSON.stringify(h));}catch(e){}};
   const saveChk  = async wc=>{if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}};
 
   const tog = (id,pk,si)=>setWC(prev=>{
@@ -268,7 +270,7 @@ function App() {
 
   const BottomNav=()=>(
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",zIndex:20,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"workouts",icon:"💪",label:"Workouts"},{id:"meals",icon:"🍽️",label:"Meals"}].map(t=>(
+      {[{id:"workouts",icon:"💪",label:"Workouts"},{id:"progress",icon:"📈",label:"Progress"},{id:"meals",icon:"🍽️",label:"Meals"}].map(t=>(
         <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"12px 0 10px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",color:tab===t.id?S.lClr:S.muted})}>
           <span style={{fontSize:20}}>{t.icon}</span>
           <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.04em"}}>{t.label}</span>
@@ -276,6 +278,131 @@ function App() {
       ))}
     </div>
   );
+
+
+  // ── PROGRESS ──────────────────────────────────────────────────────────────
+  if(tab==="progress"){
+    // Simple SVG line graph helper
+    const LineGraph = ({data, colors, labels, unit=""}) => {
+      const W=340, H=160, PAD={t:16,r:16,b:32,l:40};
+      const iW=W-PAD.l-PAD.r, iH=H-PAD.t-PAD.b;
+      if(!data.length||!data[0].length) return(
+        <div style={{height:H,display:"flex",alignItems:"center",justifyContent:"center",color:S.muted,fontSize:13}}>No data yet — update your weight in Stats to start tracking</div>
+      );
+      const allPts = data.flat();
+      const vals = allPts.map(p=>p.v);
+      const minV=Math.min(...vals)-2, maxV=Math.max(...vals)+2;
+      const dates = [...new Set(allPts.map(p=>p.date))].sort();
+      const xScale = i => PAD.l + (i/(Math.max(dates.length-1,1)))*iW;
+      const yScale = v => PAD.t + iH - ((v-minV)/(maxV-minV||1))*iH;
+      const pathFor = pts => {
+        const sorted = [...pts].sort((a,b)=>a.date.localeCompare(b.date));
+        return sorted.map((p,i)=>{
+          const x=xScale(dates.indexOf(p.date)), y=yScale(p.v);
+          return i===0?`M${x},${y}`:`L${x},${y}`;
+        }).join(" ");
+      };
+      // x-axis labels: show first, middle, last
+      const xLabels = dates.length<=1?dates:
+        dates.length===2?dates:
+        [dates[0], dates[Math.floor((dates.length-1)/2)], dates[dates.length-1]];
+      return(
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible"}}>
+          {/* Grid lines */}
+          {[0,0.25,0.5,0.75,1].map((t,i)=>{
+            const y=PAD.t+iH*t;
+            const v=Math.round(maxV-(maxV-minV)*t);
+            return(<g key={i}>
+              <line x1={PAD.l} y1={y} x2={PAD.l+iW} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+              <text x={PAD.l-6} y={y+4} textAnchor="end" fill="#4d6080" fontSize="10">{v}</text>
+            </g>);
+          })}
+          {/* X labels */}
+          {xLabels.map((d,i)=>{
+            const xi = dates.indexOf(d);
+            return(<text key={i} x={xScale(xi)} y={H-4} textAnchor="middle" fill="#4d6080" fontSize="9">{d.slice(5)}</text>);
+          })}
+          {/* Lines */}
+          {data.map((pts,di)=>pts.length>0&&(
+            <g key={di}>
+              <path d={pathFor(pts)} fill="none" stroke={colors[di]} strokeWidth="2" strokeLinejoin="round"/>
+              {pts.map((p,pi)=>(
+                <circle key={pi} cx={xScale(dates.indexOf(p.date))} cy={yScale(p.v)} r="3" fill={colors[di]}/>
+              ))}
+            </g>
+          ))}
+          {/* Legend */}
+          {labels.map((lb,i)=>(
+            <g key={i} transform={`translate(${PAD.l+i*100},${H-4})`}>
+              <line x1="0" y1="-8" x2="12" y2="-8" stroke={colors[i]} strokeWidth="2"/>
+              <text x="16" y="-4" fill={colors[i]} fontSize="9" fontWeight="700">{lb}</text>
+            </g>
+          ))}
+        </svg>
+      );
+    };
+
+    return(
+      <div style={{background:S.bg,minHeight:"100vh",color:S.txt,fontFamily:"'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif",paddingBottom:80}}>
+        <div style={{background:S.card,borderBottom:`1px solid ${S.border}`,padding:"36px 20px 18px",position:"sticky",top:0,zIndex:10}}>
+          <div style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px"}}>📈 Progress</div>
+          <div style={{fontSize:12,color:S.muted,marginTop:3}}>Track your gains over time</div>
+        </div>
+
+        <div style={{padding:"16px 16px 0",display:"flex",flexDirection:"column",gap:16}}>
+
+          {/* Body Weight Card */}
+          <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={{fontSize:16,fontWeight:800}}>⚖️ Body Weight</div>
+              <div style={{fontSize:11,color:S.muted}}>lbs · last 90 days</div>
+            </div>
+            <div style={{display:"flex",gap:16,marginBottom:14}}>
+              {[{pk:"l",c:S.lClr},{pk:"g",c:S.gClr}].map(({pk,c})=>{
+                const hist = bwHist[pk]||[];
+                const latest = hist.length?hist[hist.length-1].v:bw[pk];
+                const prev = hist.length>1?hist[hist.length-2].v:null;
+                const diff = prev?+(latest-prev).toFixed(1):null;
+                return(
+                  <div key={pk} style={{flex:1,background:S.card2,borderRadius:12,padding:"10px 12px",border:`1px solid ${c}22`}}>
+                    <div style={{fontSize:11,color:c,fontWeight:700,marginBottom:2}}>{nms[pk]}</div>
+                    <div style={{fontSize:20,fontWeight:900,color:S.txt}}>{latest} <span style={{fontSize:11,color:S.muted}}>lbs</span></div>
+                    {diff!==null&&<div style={{fontSize:11,color:diff>0?"#fb923c":diff<0?S.green:S.muted,marginTop:2}}>{diff>0?"+":""}{diff} since last update</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <LineGraph
+              data={[bwHist.l||[], bwHist.g||[]]}
+              colors={[S.lClr, S.gClr]}
+              labels={[nms.l, nms.g]}
+              unit="lbs"
+            />
+            <div style={{fontSize:11,color:S.muted,textAlign:"center",marginTop:8}}>Update weight in ⚙ Stats to log a new entry</div>
+          </div>
+
+          {/* Placeholder cards for future steps */}
+          <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`,opacity:0.5}}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🗓️ Workout Heatmap</div>
+            <div style={{fontSize:13,color:S.muted}}>Coming soon — see your consistency over time</div>
+          </div>
+
+          <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`,opacity:0.5}}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🏋️ Lift Progress</div>
+            <div style={{fontSize:13,color:S.muted}}>Coming soon — track weight increases per exercise</div>
+          </div>
+
+        </div>
+
+        {/* Version */}
+        <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
+          v2026.5.2
+        </div>
+
+        <BottomNav/>
+      </div>
+    );
+  }
 
   // ── MEALS ──────────────────────────────────────────────────────────────────
   if(tab==="meals"){
@@ -466,11 +593,22 @@ function App() {
               ))}
               <div style={{display:"flex",gap:12,marginTop:8}}>
                 <button onClick={()=>setSO(false)} style={btn({flex:1,background:S.card2,color:S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:15,border:`1px solid ${S.border}`})}>Cancel</button>
-                <button onClick={()=>{const nb={l:parseFloat(editS.bw.l)||bw.l,g:parseFloat(editS.bw.g)||bw.g};const nn={l:editS.nms.l||nms.l,g:editS.nms.g||nms.g};setBw(nb);setNms(nn);saveMeta(nb,nn);setSO(false);}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:14,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
+                <button onClick={()=>{
+  const nb={l:parseFloat(editS.bw.l)||bw.l,g:parseFloat(editS.bw.g)||bw.g};
+  const nn={l:editS.nms.l||nms.l,g:editS.nms.g||nms.g};
+  setBw(nb); setNms(nn); saveMeta(nb,nn);
+  const ts=new Date().toISOString().slice(0,10);
+  const nh={
+    l:[...bwHist.l.filter(e=>e.date!==ts),{date:ts,v:nb.l}].slice(-90),
+    g:[...bwHist.g.filter(e=>e.date!==ts),{date:ts,v:nb.g}].slice(-90)
+  };
+  setBWH(nh); saveBWH(nh); setSO(false);
+}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:14,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
               </div>
             </div>
           </div>
         )}
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.2</div>
         <BottomNav/>
       </div>
     );

@@ -273,7 +273,7 @@ function App() {
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
   const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
   const [openEx,setOpenEx]   = useState(null);
-  const [restTimer,setRT]    = useState(null);  // {secs, total, pk} | null
+  const [restTimer,setRT]    = useState({l:null,g:null});  // {l:{secs,total}|null, g:{secs,total}|null}
   const [prs,setPRs]         = useState({});    // {exId_pk: maxWt}
   const [weighInDone,setWID] = useState(false); // true if logged today
   const [weighInOpen,setWIO] = useState(false);
@@ -346,20 +346,19 @@ function App() {
   };
 
   const tog = (id,pk,si)=>{
+    // Read BEFORE toggling so we know if this is a check or uncheck
     setWC(prev=>{
       const day=prev[vDay]||{}, ex=day[id]||{}, arr=[...(ex[pk]||[])];
+      const wasUnchecked = !arr[si];  // true = user is checking it ON
       arr[si]=!arr[si];
       const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:arr}}};
-      saveChk(nw); return nw;
-    });
-    // Start rest timer when checking a set (not unchecking)
-    setWC(prev=>{
-      const wasUnchecked=!(prev[vDay]?.[id]?.[pk]?.[si]);
+      saveChk(nw);
+      // Start rest timer only when checking a set ON
       if(wasUnchecked){
         const secs=pk==="l"?90:60;
-        setRT({secs,total:secs,pk});
+        setRT(p=>({...p,[pk]:{secs,total:secs}}));
       }
-      return prev;
+      return nw;
     });
   };
   const chkAll = (id,pk,n,v)=>setWC(prev=>{
@@ -489,10 +488,15 @@ function App() {
 
   // ── REST TIMER COUNTDOWN ─────────────────────────────────────────────────
   useEffect(()=>{
-    if(!restTimer||restTimer.secs<=0) return;
-    const id=setTimeout(()=>setRT(p=>p?{...p,secs:p.secs-1}:null),1000);
+    if(!restTimer.l||restTimer.l.secs<=0) return;
+    const id=setTimeout(()=>setRT(p=>({...p,l:p.l?{...p.l,secs:p.l.secs-1}:null})),1000);
     return()=>clearTimeout(id);
-  },[restTimer]);
+  },[restTimer.l]);
+  useEffect(()=>{
+    if(!restTimer.g||restTimer.g.secs<=0) return;
+    const id=setTimeout(()=>setRT(p=>({...p,g:p.g?{...p.g,secs:p.g.secs-1}:null})),1000);
+    return()=>clearTimeout(id);
+  },[restTimer.g]);
 
   // ── PULL TO REFRESH ──────────────────────────────────────────────────────
   useEffect(()=>{
@@ -515,31 +519,42 @@ function App() {
 
   // ── REST TIMER OVERLAY ────────────────────────────────────────────────────
   const RestTimerBar = () => {
-    if(!restTimer) return null;
-    const {secs,total,pk} = restTimer;
-    const pct = secs/total;
-    const clr = pk==="l"?S.lClr:S.gClr;
-    const done = secs<=0;
+    const timers = [
+      restTimer.l ? {pk:"l", clr:S.lClr, ...restTimer.l} : null,
+      restTimer.g ? {pk:"g", clr:S.gClr, ...restTimer.g} : null,
+    ].filter(Boolean);
+    if(!timers.length) return null;
+
     return(
-      <div style={{position:"fixed",bottom:80,left:12,right:12,zIndex:90,background:S.card,borderRadius:18,padding:"12px 16px",border:`1px solid ${clr}44`,boxShadow:`0 4px 24px rgba(0,0,0,0.5)`}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:16}}>{done?"✅":"⏱️"}</span>
-            <div>
-              <div style={{fontSize:13,fontWeight:700,color:clr}}>{pk==="l"?nms.l:nms.g} — Rest</div>
-              <div style={{fontSize:11,color:S.muted}}>{done?"Rest done — start next set":"Next set in..."}</div>
+      <div style={{position:"fixed",bottom:80,left:12,right:12,zIndex:90,display:"flex",flexDirection:"column",gap:8}}>
+        {timers.map(({pk,clr,secs,total})=>{
+          const pct=secs/total, done=secs<=0;
+          return(
+            <div key={pk} style={{background:S.card,borderRadius:18,padding:"12px 16px",border:`1px solid ${clr}55`,boxShadow:"0 4px 24px rgba(0,0,0,0.6)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>{done?"✅":"⏱️"}</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:clr}}>{pk==="l"?nms.l:nms.g} — Rest</div>
+                    <div style={{fontSize:11,color:S.muted}}>{done?"Done — start next set!":"Next set in..."}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{fontSize:24,fontWeight:900,color:done?S.green:S.txt,fontVariantNumeric:"tabular-nums"}}>
+                    {done?"Go!":`${Math.floor(secs/60)}:${String(secs%60).padStart(2,"0")}`}
+                  </div>
+                  <button
+                    onClick={()=>setRT(p=>({...p,[pk]:null}))}
+                    style={btn({background:"rgba(255,255,255,0.06)",color:S.muted,padding:"6px 12px",borderRadius:10,fontSize:12,fontWeight:700})}
+                  >Skip</button>
+                </div>
+              </div>
+              <div style={{height:4,background:"rgba(255,255,255,0.06)",borderRadius:99,overflow:"hidden"}}>
+                <div style={{height:"100%",background:done?S.green:clr,borderRadius:99,width:`${pct*100}%`,transition:"width 1s linear"}}/>
+              </div>
             </div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{fontSize:24,fontWeight:900,color:done?S.green:S.txt,fontVariantNumeric:"tabular-nums"}}>
-              {done?"Go!":`${Math.floor(secs/60)}:${String(secs%60).padStart(2,"0")}`}
-            </div>
-            <button onClick={()=>setRT(null)} style={btn({background:"rgba(255,255,255,0.06)",color:S.muted,padding:"6px 12px",borderRadius:10,fontSize:12,fontWeight:700})}>Skip</button>
-          </div>
-        </div>
-        <div style={{height:4,background:"rgba(255,255,255,0.06)",borderRadius:99,overflow:"hidden"}}>
-          <div style={{height:"100%",background:done?S.green:clr,borderRadius:99,width:`${pct*100}%`,transition:"width 1s linear"}}/>
-        </div>
+          );
+        })}
       </div>
     );
   };
@@ -1062,7 +1077,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.7
+          v2026.5.8
         </div>
 
         <BottomNav/>
@@ -1275,7 +1290,7 @@ function App() {
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.7</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.8</div>
         <BottomNav/>
       </div>
     );

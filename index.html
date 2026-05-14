@@ -23,7 +23,6 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // localStorage adapter — data persists through refreshes and app updates
     window.storage = {
       get: async (key) => {
         try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; }
@@ -86,6 +85,45 @@ const DW = {
   deadlft:{l:115,g:75},hipthrs:{l:95,g:65},legcrl:{l:50,g:35},
   bss:{l:20,g:15},adduct:{l:50,g:40},calfst:{l:70,g:50}
 };
+
+// All exercises flat for lookup
+const ALL_EX = Object.values({upperA:{exercises:[
+  {id:"bench",name:"Bench Press",short:"Bench",icon:"🏋️"},
+  {id:"ohp",name:"Overhead Press",short:"OHP",icon:"💪"},
+  {id:"incline",name:"Incline Press",short:"Incline",icon:"📐"},
+  {id:"ltraise",name:"Lateral Raises",short:"Laterals",icon:"🦾"},
+  {id:"pushdn",name:"Tricep Pushdown",short:"Pushdown",icon:"⚡"},
+  {id:"triext",name:"OT Extension",short:"OT Ext",icon:"🔥"},
+]},lowerA:{exercises:[
+  {id:"squat",name:"Back Squat",short:"Squat",icon:"🏆"},
+  {id:"rdl",name:"Romanian DL",short:"RDL",icon:"🏋️"},
+  {id:"legprs",name:"Leg Press",short:"Leg Press",icon:"🦵"},
+  {id:"lunges",name:"Lunges",short:"Lunges",icon:"🚶"},
+  {id:"legext",name:"Leg Extension",short:"Leg Ext",icon:"🦵"},
+  {id:"calfs",name:"Calf Raises",short:"Calves",icon:"👟"},
+]},upperB:{exercises:[
+  {id:"bbrow",name:"Barbell Row",short:"BB Row",icon:"🏋️"},
+  {id:"pulldn",name:"Lat Pulldown",short:"Pulldown",icon:"⬇️"},
+  {id:"cblrow",name:"Cable Row",short:"Cable Row",icon:"🔄"},
+  {id:"facpul",name:"Face Pulls",short:"Face Pulls",icon:"🎯"},
+  {id:"dbcurl",name:"DB Curl",short:"DB Curl",icon:"💪"},
+  {id:"hammer",name:"Hammer Curl",short:"Hammer",icon:"🔨"},
+]},lowerB:{exercises:[
+  {id:"deadlft",name:"Deadlift",short:"Deadlift",icon:"🏆"},
+  {id:"hipthrs",name:"Hip Thrust",short:"Hip Thrust",icon:"🍑"},
+  {id:"legcrl",name:"Leg Curl",short:"Leg Curl",icon:"🦵"},
+  {id:"bss",name:"Bulgarian Split",short:"BSS",icon:"🚀"},
+  {id:"adduct",name:"Adductor",short:"Adductor",icon:"🦵"},
+  {id:"calfst",name:"Seated Calves",short:"Calves",icon:"👟"},
+]}}).flatMap(w=>w.exercises);
+const EX_MAP = Object.fromEntries(ALL_EX.map(e=>[e.id,e]));
+
+const MUSCLE_GROUPS = [
+  {name:"Chest · Shoulders · Triceps", icon:"🏋️", ids:["bench","ohp","incline","ltraise","pushdn","triext"]},
+  {name:"Quads · Glutes · Calves",     icon:"🦵", ids:["squat","rdl","legprs","lunges","legext","calfs"]},
+  {name:"Back · Biceps",               icon:"💪", ids:["bbrow","pulldn","cblrow","facpul","dbcurl","hammer"]},
+  {name:"Hamstrings · Glutes",         icon:"🍑", ids:["deadlft","hipthrs","legcrl","bss","adduct","calfst"]},
+];
 
 const DEMO = {
   bench:{equip:"Flat barbell bench + spotter or Smith machine",cues:["Grip just outside shoulder-width","Slight arch, feet flat on floor","Bar touches lower chest not your neck","Drive through feet as you press up","Control the bar down dont bounce"],yt:"barbell+bench+press+form+tutorial"},
@@ -369,6 +407,24 @@ function App() {
   };
 
 
+  // ── PULL TO REFRESH ──────────────────────────────────────────────────────
+  useEffect(()=>{
+    let startY=0, pulled=false;
+    const onStart = e => { startY=e.touches[0].clientY; pulled=false; };
+    const onMove  = e => {
+      if(window.scrollY===0 && e.touches[0].clientY - startY > 80){ pulled=true; }
+    };
+    const onEnd   = () => { if(pulled){ pulled=false; window.location.reload(); } };
+    document.addEventListener("touchstart",onStart,{passive:true});
+    document.addEventListener("touchmove",onMove,{passive:true});
+    document.addEventListener("touchend",onEnd);
+    return()=>{
+      document.removeEventListener("touchstart",onStart);
+      document.removeEventListener("touchmove",onMove);
+      document.removeEventListener("touchend",onEnd);
+    };
+  },[]);
+
   // ── FEEDBACK POPUP ────────────────────────────────────────────────────────
   const FeedbackPopup = () => {
     if(!fbPopup) return null;
@@ -604,22 +660,101 @@ function App() {
             <div style={{fontSize:11,color:S.muted,textAlign:"center",marginTop:8}}>Update weight in ⚙ Stats to log a new entry</div>
           </div>
 
-          {/* Placeholder cards for future steps */}
+          {/* Workout Heatmap placeholder */}
           <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`,opacity:0.5}}>
             <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🗓️ Workout Heatmap</div>
-            <div style={{fontSize:13,color:S.muted}}>Coming soon — see your consistency over time</div>
+            <div style={{fontSize:13,color:S.muted}}>Coming next update</div>
           </div>
 
-          <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`,opacity:0.5}}>
-            <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🏋️ Lift Progress</div>
-            <div style={{fontSize:13,color:S.muted}}>Coming soon — track weight increases per exercise</div>
-          </div>
+          {/* Lift Progress Section */}
+          {(()=>{
+            const [openEx, setOpenEx] = React.useState(null);
+            return(
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{fontSize:16,fontWeight:800,paddingTop:4}}>🏋️ Lift Progress</div>
+                {MUSCLE_GROUPS.map((mg,mgi)=>(
+                  <div key={mgi} style={{background:S.card,borderRadius:20,overflow:"hidden",border:`1px solid ${S.border}`}}>
+                    <div style={{padding:"14px 18px 10px",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${S.border}`}}>
+                      <span style={{fontSize:18}}>{mg.icon}</span>
+                      <span style={{fontSize:13,fontWeight:800,color:"#a0b8d8",letterSpacing:"0.03em"}}>{mg.name}</span>
+                    </div>
+                    {mg.ids.map((id,ei)=>{
+                      const ex = EX_MAP[id]; if(!ex) return null;
+                      const lWt = wts[id]?.l||0, gWt = wts[id]?.g||0;
+                      const lKey=id+"_l", gKey=id+"_g";
+                      const lPO=poData[lKey], gPO=poData[gKey];
+                      const lHist=lPO?.history||[], gHist=gPO?.history||[];
+                      const lNext=lPO?.nextDate, gNext=gPO?.nextDate;
+                      const today=new Date().toISOString().slice(0,10);
+                      const daysUntil = d=>{if(!d)return null;const diff=Math.ceil((new Date(d)-new Date())/86400000);return diff<=0?"Today":diff===1?"Tomorrow":`In ${diff} days`;};
+                      const isOpen = openEx===id;
+                      const allHist = [...lHist.map(h=>({...h,pk:"l"})),...gHist.map(h=>({...h,pk:"g"}))];
+                      const hasHistory = lHist.length>0||gHist.length>0;
+                      return(
+                        <div key={id} style={{borderTop:ei>0?`1px solid ${S.border}`:"none"}}>
+                          <button onClick={()=>setOpenEx(isOpen?null:id)} style={btn({width:"100%",padding:"12px 18px",display:"flex",alignItems:"center",gap:12,background:"none",color:S.txt,textAlign:"left"})}>
+                            <span style={{fontSize:22,flexShrink:0}}>{ex.icon}</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:14,fontWeight:700,color:"#d0e8ff"}}>{ex.name}</div>
+                              <div style={{display:"flex",gap:10,marginTop:4}}>
+                                <span style={{fontSize:11,color:S.lClr,fontWeight:700}}>{nms.l}: {lWt} lbs</span>
+                                <span style={{fontSize:11,color:S.gClr,fontWeight:700}}>{nms.g}: {gWt} lbs</span>
+                              </div>
+                            </div>
+                            <span style={{color:S.muted,fontSize:14,transform:isOpen?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>⌄</span>
+                          </button>
+
+                          {isOpen&&(
+                            <div style={{padding:"0 18px 16px",borderTop:`1px solid ${S.border}`}}>
+                              {/* Next increase info */}
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12,marginBottom:14}}>
+                                {[{pk:"l",c:S.lClr,po:lPO,wt:lWt},{pk:"g",c:S.gClr,po:gPO,wt:gWt}].map(({pk,c,po,wt})=>(
+                                  <div key={pk} style={{background:S.card2,borderRadius:12,padding:"10px 12px",border:`1px solid ${c}22`}}>
+                                    <div style={{fontSize:11,color:c,fontWeight:700,marginBottom:4}}>{pk==="l"?nms.l:nms.g}</div>
+                                    <div style={{fontSize:18,fontWeight:900,color:S.txt}}>{wt} <span style={{fontSize:10,color:S.muted}}>lbs</span></div>
+                                    {po?.pendingWt&&po.pendingWt!==wt?(
+                                      <div style={{fontSize:11,color:"#22c55e",marginTop:3}}>→ {po.pendingWt} lbs {daysUntil(po.nextDate)&&`(${daysUntil(po.nextDate)})`}</div>
+                                    ):po?.nextDate?(
+                                      <div style={{fontSize:11,color:S.muted,marginTop:3}}>Next check {daysUntil(po.nextDate)||"scheduled"}</div>
+                                    ):(
+                                      <div style={{fontSize:11,color:S.muted,marginTop:3}}>No increase scheduled yet</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Weight history graph */}
+                              {hasHistory?(
+                                <>
+                                  <div style={{fontSize:11,color:S.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Weight History</div>
+                                  <LineGraph
+                                    data={[lHist.map(h=>({date:h.date,v:h.wt})), gHist.map(h=>({date:h.date,v:h.wt}))]}
+                                    colors={[S.lClr,S.gClr]}
+                                    labels={[nms.l,nms.g]}
+                                    unit="lbs"
+                                  />
+                                </>
+                              ):(
+                                <div style={{textAlign:"center",padding:"16px 0",fontSize:12,color:S.muted}}>
+                                  No history yet — weights log automatically as you use the app
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
         </div>
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.3
+          v2026.5.4
         </div>
 
         <BottomNav/>
@@ -831,7 +966,7 @@ function App() {
             </div>
           </div>
         )}
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.3</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.4</div>
         <BottomNav/>
       </div>
     );
@@ -999,7 +1134,20 @@ function App() {
               <div style={{fontSize:12,color:S.muted,textAlign:"center",marginBottom:18}}>lbs · use +5 / -5 for quick adjustments</div>
               <div style={{display:"flex",gap:12}}>
                 <button onClick={()=>setWM(null)} style={btn({flex:1,background:S.card2,color:S.muted,padding:15,borderRadius:14,fontWeight:700,fontSize:15,border:`1px solid ${S.border}`})}>Cancel</button>
-                <button onClick={()=>{const num=parseFloat(wtMod.val);if(!isNaN(num)&&num>0){const nw={...wts,[wtMod.id]:{...wts[wtMod.id],[wtMod.pk]:num}};setWts(nw);saveWts(nw);}setWM(null);}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:15,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
+                <button onClick={()=>{
+  const num=parseFloat(wtMod.val);
+  if(!isNaN(num)&&num>0){
+    const nw={...wts,[wtMod.id]:{...wts[wtMod.id],[wtMod.pk]:num}};
+    setWts(nw); saveWts(nw);
+    // Log to PO history
+    const key=wtMod.id+"_"+wtMod.pk;
+    const ts=new Date().toISOString().slice(0,10);
+    const hist=[...(poData[key]?.history||[]).filter(h=>h.date!==ts),{date:ts,wt:num}].slice(-50);
+    const npo={...poData,[key]:{...(poData[key]||{}),history:hist,pendingWt:num}};
+    setPO(npo); savePO(npo);
+  }
+  setWM(null);
+}} style={btn({flex:1,background:S.lClr,color:"#fff",padding:15,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
               </div>
             </div>
           </div>

@@ -271,6 +271,7 @@ function App() {
   const [fbPopup,setFB]    = useState(null);  // null | {wk,day,answers:{l:{feel,sets,reps},g:{feel,sets,reps}},step}
   const [fbGiven,setFBG]   = useState({});    // {weekKey_day: true}
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
+  const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
 
   useEffect(()=>{
     (async()=>{
@@ -281,6 +282,11 @@ function App() {
         try{const r=await window.storage.get("lft-bwhist");if(r)setBWH(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-fbgiven");if(r)setFBG(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-po");if(r)setPO(JSON.parse(r.value));}catch(e){}
+        // Load all historical week keys for heatmap
+        try{
+          const awR=await window.storage.get("lft-allweeks");
+          if(awR){ setAW(JSON.parse(awR.value)); }
+        }catch(e){}
       }
       setLoad(false);
     })();
@@ -291,7 +297,16 @@ function App() {
   const saveBWH  = async h=>{if(window.storage)try{await window.storage.set("lft-bwhist",JSON.stringify(h));}catch(e){}};
   const saveFBG  = async d=>{if(window.storage)try{await window.storage.set("lft-fbgiven",JSON.stringify(d));}catch(e){}};
   const savePO   = async d=>{if(window.storage)try{await window.storage.set("lft-po",JSON.stringify(d));}catch(e){}};
-  const saveChk  = async wc=>{if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}};
+  const saveAW   = async d=>{if(window.storage)try{await window.storage.set("lft-allweeks",JSON.stringify(d));}catch(e){}};
+  const saveChk  = async wc=>{
+    if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}
+    // Mirror into allWeeks for heatmap
+    setAW(prev=>{
+      const naw={...prev,[weekKey]:wc};
+      saveAW(naw);
+      return naw;
+    });
+  };
 
   const tog = (id,pk,si)=>setWC(prev=>{
     const day=prev[vDay]||{}, ex=day[id]||{}, arr=[...(ex[pk]||[])];
@@ -660,11 +675,143 @@ function App() {
             <div style={{fontSize:11,color:S.muted,textAlign:"center",marginTop:8}}>Update weight in ⚙ Stats to log a new entry</div>
           </div>
 
-          {/* Workout Heatmap placeholder */}
-          <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`,opacity:0.5}}>
-            <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🗓️ Workout Heatmap</div>
-            <div style={{fontSize:13,color:S.muted}}>Coming next update</div>
-          </div>
+          {/* Workout Heatmap */}
+          {(()=>{
+            // Build 16-week grid ending today, Sun-Sat columns
+            const WEEKS_SHOWN = 16;
+            const todayDate = new Date();
+            // Start from the Sunday of (WEEKS_SHOWN-1) weeks ago
+            const startSun = new Date(todayDate);
+            startSun.setDate(todayDate.getDate() - todayDate.getDay() - 7*(WEEKS_SHOWN-1));
+
+            // Build grid: array of weeks, each week is array of 7 days
+            const grid = [];
+            for(let w=0;w<WEEKS_SHOWN;w++){
+              const week = [];
+              for(let d=0;d<7;d++){
+                const date = new Date(startSun);
+                date.setDate(startSun.getDate() + w*7 + d);
+                const dayNum = date.getDay(); // 0=Sun..6=Sat
+                const isFuture = date > todayDate;
+                // Get weekKey for this date (Sunday of that week)
+                const sun = new Date(date); sun.setDate(date.getDate()-date.getDay());
+                const wk = `${sun.getFullYear()}-${String(sun.getMonth()+1).padStart(2,'0')}-${String(sun.getDate()).padStart(2,'0')}`;
+                const wkData = allWeeks[wk]||{};
+                const woKey = SCHED[dayNum];
+                let pct = 0;
+                if(woKey && !isFuture){
+                  const dayData = wkData[dayNum]||{};
+                  const tot = WO[woKey].exercises.reduce((a,e)=>a+e.l.s+e.g.s,0);
+                  const dn  = WO[woKey].exercises.reduce((a,e)=>{
+                    const lArr=dayData[e.id]?.l||[], gArr=dayData[e.id]?.g||[];
+                    return a+lArr.filter(Boolean).length+gArr.filter(Boolean).length;
+                  },0);
+                  pct = tot>0?dn/tot:0;
+                }
+                week.push({date,dayNum,woKey,isFuture,pct,isToday:date.toDateString()===todayDate.toDateString()});
+              }
+              grid.push(week);
+            }
+
+            // Color scale: 0=empty, >0=green shades
+            const cellClr = (cell) => {
+              if(cell.isFuture||!cell.woKey) return "rgba(255,255,255,0.04)";
+              if(cell.pct===0) return "rgba(255,255,255,0.06)";
+              if(cell.pct<0.33) return "#166534";
+              if(cell.pct<0.66) return "#16a34a";
+              if(cell.pct<1)    return "#22c55e";
+              return "#4ade80"; // full completion
+            };
+
+            const DAYLABELS = ["S","M","T","W","T","F","S"];
+            // Month labels: find first cell of each month
+            const monthLabels = [];
+            grid.forEach((week,wi)=>{
+              const first = week.find(c=>c.date.getDate()===1||wi===0);
+              if(first&&(wi===0||week[0].date.getDate()<=7)){
+                const mo = week[0].date.toLocaleString("default",{month:"short"});
+                if(!monthLabels.length||monthLabels[monthLabels.length-1].label!==mo){
+                  monthLabels.push({label:mo,wi});
+                }
+              }
+            });
+
+            // Completion streak
+            let streak=0;
+            const today2=new Date();
+            for(let i=0;i<60;i++){
+              const d=new Date(today2); d.setDate(today2.getDate()-i);
+              const dn=d.getDay(); const woK=SCHED[dn];
+              if(!woK){continue;} // rest day doesn't break streak
+              const sun=new Date(d); sun.setDate(d.getDate()-d.getDay());
+              const wkk=`${sun.getFullYear()}-${String(sun.getMonth()+1).padStart(2,'0')}-${String(sun.getDate()).padStart(2,'0')}`;
+              const dd=allWeeks[wkk]?.[dn]||{};
+              const tot=WO[woK].exercises.reduce((a,e)=>a+e.l.s+e.g.s,0);
+              const dn2=WO[woK].exercises.reduce((a,e)=>{const l=dd[e.id]?.l||[],g=dd[e.id]?.g||[];return a+l.filter(Boolean).length+g.filter(Boolean).length;},0);
+              if(tot>0&&dn2===tot){streak++;}else if(tot>0){break;}
+            }
+
+            return(
+              <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{fontSize:16,fontWeight:800}}>🗓️ Workout Heatmap</div>
+                  {streak>0&&<div style={{fontSize:12,color:"#4ade80",fontWeight:700}}>🔥 {streak} workout streak</div>}
+                </div>
+
+                {/* Day labels */}
+                <div style={{display:"flex",gap:2,marginBottom:4,paddingLeft:20}}>
+                  {DAYLABELS.map((l,i)=>(
+                    <div key={i} style={{width:14,fontSize:8,color:S.muted,textAlign:"center",flexShrink:0}}>{l}</div>
+                  ))}
+                </div>
+
+                {/* Grid: rows=weeks, cols=days */}
+                <div style={{overflowX:"auto"}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,minWidth:"fit-content"}}>
+                    {/* Month labels row */}
+                    <div style={{display:"flex",gap:2,paddingLeft:20,marginBottom:2}}>
+                      {grid.map((week,wi)=>{
+                        const ml=monthLabels.find(m=>m.wi===wi);
+                        return(
+                          <div key={wi} style={{width:14,flexShrink:0,fontSize:8,color:S.muted,textAlign:"left"}}>
+                            {ml?ml.label.slice(0,1):""}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Day rows */}
+                    {[0,1,2,3,4,5,6].map(dayIdx=>(
+                      <div key={dayIdx} style={{display:"flex",alignItems:"center",gap:2}}>
+                        <div style={{width:18,fontSize:8,color:S.muted,flexShrink:0,textAlign:"right",paddingRight:2}}>
+                          {[0,2,4].includes(dayIdx)?DAYLABELS[dayIdx]:""}
+                        </div>
+                        {grid.map((week,wi)=>{
+                          const cell=week[dayIdx];
+                          return(
+                            <div key={wi} style={{
+                              width:14,height:14,borderRadius:3,flexShrink:0,
+                              background:cellClr(cell),
+                              border:cell.isToday?"1px solid #4da6ff":"1px solid transparent",
+                              transition:"background 0.2s"
+                            }}/>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Legend */}
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:12,justifyContent:"flex-end"}}>
+                  <span style={{fontSize:9,color:S.muted}}>Less</span>
+                  {["rgba(255,255,255,0.06)","#166534","#16a34a","#22c55e","#4ade80"].map((c,i)=>(
+                    <div key={i} style={{width:11,height:11,borderRadius:2,background:c}}/>
+                  ))}
+                  <span style={{fontSize:9,color:S.muted}}>More</span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Lift Progress Section */}
           {(()=>{
@@ -754,7 +901,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.4
+          v2026.5.5
         </div>
 
         <BottomNav/>
@@ -966,7 +1113,7 @@ function App() {
             </div>
           </div>
         )}
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.4</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.5</div>
         <BottomNav/>
       </div>
     );

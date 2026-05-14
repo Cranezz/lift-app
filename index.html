@@ -272,7 +272,12 @@ function App() {
   const [fbGiven,setFBG]   = useState({});    // {weekKey_day: true}
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
   const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
-  const [openEx,setOpenEx] = useState(null);    // for lift progress expand/collapse
+  const [openEx,setOpenEx]   = useState(null);
+  const [restTimer,setRT]    = useState(null);  // {secs, total, pk} | null
+  const [prs,setPRs]         = useState({});    // {exId_pk: maxWt}
+  const [weighInDone,setWID] = useState(false); // true if logged today
+  const [weighInOpen,setWIO] = useState(false);
+  const [weighInVals,setWIV] = useState({l:"",g:""});
 
   useEffect(()=>{
     (async()=>{
@@ -283,12 +288,42 @@ function App() {
         try{const r=await window.storage.get("lft-bwhist");if(r)setBWH(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-fbgiven");if(r)setFBG(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-po");if(r)setPO(JSON.parse(r.value));}catch(e){}
+        try{const r=await window.storage.get("lft-prs");if(r)setPRs(JSON.parse(r.value));}catch(e){}
+        // Check if weighed in today
+        const todayStr=new Date().toISOString().slice(0,10);
+        try{const r=await window.storage.get("lft-weighdate");if(r&&r.value===todayStr)setWID(true);}catch(e){}
         // Load all historical week keys for heatmap
         try{
           const awR=await window.storage.get("lft-allweeks");
           if(awR){ setAW(JSON.parse(awR.value)); }
         }catch(e){}
       }
+      // Seed body weight history if empty
+      const todaySeed=new Date().toISOString().slice(0,10);
+      setBWH(prev=>{
+        if(prev.l.length===0&&prev.g.length===0){
+          const seeded={l:[{date:todaySeed,v:155}],g:[{date:todaySeed,v:185}]};
+          if(window.storage)window.storage.set("lft-bwhist",JSON.stringify(seeded));
+          return seeded;
+        }
+        return prev;
+      });
+      // Seed lift history from DW if poData has no history
+      setPO(prev=>{
+        const npo={...prev};
+        let changed=false;
+        Object.keys(DW).forEach(id=>{
+          ["l","g"].forEach(pk=>{
+            const key=id+"_"+pk;
+            if(!npo[key]?.history?.length){
+              npo[key]={...(npo[key]||{}),history:[{date:todaySeed,wt:DW[id][pk]}],pendingWt:DW[id][pk]};
+              changed=true;
+            }
+          });
+        });
+        if(changed&&window.storage)window.storage.set("lft-po",JSON.stringify(npo));
+        return changed?npo:prev;
+      });
       setLoad(false);
     })();
   },[]);
@@ -299,6 +334,7 @@ function App() {
   const saveFBG  = async d=>{if(window.storage)try{await window.storage.set("lft-fbgiven",JSON.stringify(d));}catch(e){}};
   const savePO   = async d=>{if(window.storage)try{await window.storage.set("lft-po",JSON.stringify(d));}catch(e){}};
   const saveAW   = async d=>{if(window.storage)try{await window.storage.set("lft-allweeks",JSON.stringify(d));}catch(e){}};
+  const savePRs  = async d=>{if(window.storage)try{await window.storage.set("lft-prs",JSON.stringify(d));}catch(e){}};
   const saveChk  = async wc=>{
     if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}
     // Mirror into allWeeks for heatmap
@@ -309,12 +345,23 @@ function App() {
     });
   };
 
-  const tog = (id,pk,si)=>setWC(prev=>{
-    const day=prev[vDay]||{}, ex=day[id]||{}, arr=[...(ex[pk]||[])];
-    arr[si]=!arr[si];
-    const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:arr}}};
-    saveChk(nw); return nw;
-  });
+  const tog = (id,pk,si)=>{
+    setWC(prev=>{
+      const day=prev[vDay]||{}, ex=day[id]||{}, arr=[...(ex[pk]||[])];
+      arr[si]=!arr[si];
+      const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:arr}}};
+      saveChk(nw); return nw;
+    });
+    // Start rest timer when checking a set (not unchecking)
+    setWC(prev=>{
+      const wasUnchecked=!(prev[vDay]?.[id]?.[pk]?.[si]);
+      if(wasUnchecked){
+        const secs=pk==="l"?90:60;
+        setRT({secs,total:secs,pk});
+      }
+      return prev;
+    });
+  };
   const chkAll = (id,pk,n,v)=>setWC(prev=>{
     const day=prev[vDay]||{}, ex=day[id]||{};
     const nw={...prev,[vDay]:{...day,[id]:{...ex,[pk]:Array(n).fill(v)}}};
@@ -331,6 +378,11 @@ function App() {
   const gAll     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+e.l.s+e.g.s,0);
   const gTot     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdn(e.id,"l")+gdn(e.id,"g"),0);
   const gTotDay  = (wk,day)=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdnDay(day,e.id,"l")+gdnDay(day,e.id,"g"),0);
+
+  // Open weigh-in popup on load if not done today
+  useEffect(()=>{
+    if(!loading&&!weighInDone) setWIO(true);
+  },[loading]);
 
   // Trigger feedback popup when a workout day is fully completed
   useEffect(()=>{
@@ -420,8 +472,27 @@ function App() {
       });
     });
     setWts(newWts); saveWts(newWts);
+    // Update PRs
+    setPRs(prevPRs=>{
+      const np={...prevPRs};
+      WO[wk].exercises.forEach(ex=>{
+        ["l","g"].forEach(pk=>{
+          const key=ex.id+"_"+pk;
+          const nw=newWts[ex.id]?.[pk];
+          if(nw&&(!np[key]||nw>np[key])) np[key]=nw;
+        });
+      });
+      savePRs(np); return np;
+    });
   };
 
+
+  // ── REST TIMER COUNTDOWN ─────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!restTimer||restTimer.secs<=0) return;
+    const id=setTimeout(()=>setRT(p=>p?{...p,secs:p.secs-1}:null),1000);
+    return()=>clearTimeout(id);
+  },[restTimer]);
 
   // ── PULL TO REFRESH ──────────────────────────────────────────────────────
   useEffect(()=>{
@@ -440,6 +511,100 @@ function App() {
       document.removeEventListener("touchend",onEnd);
     };
   },[]);
+
+
+  // ── REST TIMER OVERLAY ────────────────────────────────────────────────────
+  const RestTimerBar = () => {
+    if(!restTimer) return null;
+    const {secs,total,pk} = restTimer;
+    const pct = secs/total;
+    const clr = pk==="l"?S.lClr:S.gClr;
+    const done = secs<=0;
+    return(
+      <div style={{position:"fixed",bottom:80,left:12,right:12,zIndex:90,background:S.card,borderRadius:18,padding:"12px 16px",border:`1px solid ${clr}44`,boxShadow:`0 4px 24px rgba(0,0,0,0.5)`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>{done?"✅":"⏱️"}</span>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:clr}}>{pk==="l"?nms.l:nms.g} — Rest</div>
+              <div style={{fontSize:11,color:S.muted}}>{done?"Rest done — start next set":"Next set in..."}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{fontSize:24,fontWeight:900,color:done?S.green:S.txt,fontVariantNumeric:"tabular-nums"}}>
+              {done?"Go!":`${Math.floor(secs/60)}:${String(secs%60).padStart(2,"0")}`}
+            </div>
+            <button onClick={()=>setRT(null)} style={btn({background:"rgba(255,255,255,0.06)",color:S.muted,padding:"6px 12px",borderRadius:10,fontSize:12,fontWeight:700})}>Skip</button>
+          </div>
+        </div>
+        <div style={{height:4,background:"rgba(255,255,255,0.06)",borderRadius:99,overflow:"hidden"}}>
+          <div style={{height:"100%",background:done?S.green:clr,borderRadius:99,width:`${pct*100}%`,transition:"width 1s linear"}}/>
+        </div>
+      </div>
+    );
+  };
+
+  // ── DAILY WEIGH-IN POPUP ──────────────────────────────────────────────────
+  const WeighInPopup = () => {
+    if(weighInDone||!weighInOpen) return null;
+    const bothFilled = weighInVals.l&&weighInVals.g;
+    const now = new Date().getHours();
+    const tip = now<10
+      ? "Perfect time to weigh in — morning, after bathroom, before eating or drinking."
+      : now<14
+      ? "Best to weigh yourself tomorrow morning — same time, before eating, for consistency."
+      : "For best accuracy, weigh yourself tomorrow morning right after waking up.";
+
+    return(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:110,display:"flex",alignItems:"flex-end"}}>
+        <div style={{background:S.card,width:"100%",borderRadius:"24px 24px 0 0",padding:"28px 20px 36px",border:`1px solid ${S.border}`}}>
+          <div style={{textAlign:"center",marginBottom:4}}>
+            <div style={{fontSize:24}}>⚖️</div>
+            <div style={{fontSize:19,fontWeight:800,marginTop:6}}>Daily Weigh-In</div>
+          </div>
+          <div style={{background:"rgba(77,166,255,0.08)",border:"1px solid rgba(77,166,255,0.15)",borderRadius:12,padding:"10px 14px",margin:"14px 0",fontSize:13,color:"#7ab8ff",lineHeight:1.6,textAlign:"center"}}>
+            💡 {tip}
+          </div>
+          {[{pk:"l",c:S.lClr},{pk:"g",c:S.gClr}].map(({pk,c})=>(
+            <div key={pk} style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:c,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>{nms[pk]}</div>
+              <input
+                type="number"
+                placeholder={`Current weight (lbs)`}
+                value={weighInVals[pk]}
+                onChange={e=>setWIV(p=>({...p,[pk]:e.target.value}))}
+                style={{background:S.card2,color:S.txt,width:"100%",borderRadius:12,padding:"12px 14px",fontSize:16,boxSizing:"border-box",border:`1px solid ${c}33`,outline:"none"}}
+              />
+            </div>
+          ))}
+          <div style={{display:"flex",gap:12,marginTop:8}}>
+            <button
+              onClick={()=>setWIO(false)}
+              style={btn({flex:1,background:S.card2,color:S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:14,border:`1px solid ${S.border}`})}
+            >Later</button>
+            <button
+              onClick={()=>{
+                if(!bothFilled) return;
+                const todayStr=new Date().toISOString().slice(0,10);
+                const nl=parseFloat(weighInVals.l), ng=parseFloat(weighInVals.g);
+                if(isNaN(nl)||isNaN(ng)) return;
+                const nb={l:nl,g:ng};
+                setBw(nb); saveMeta(nb,nms);
+                const nh={
+                  l:[...bwHist.l.filter(e=>e.date!==todayStr),{date:todayStr,v:nl}].slice(-90),
+                  g:[...bwHist.g.filter(e=>e.date!==todayStr),{date:todayStr,v:ng}].slice(-90)
+                };
+                setBWH(nh); saveBWH(nh);
+                if(window.storage)window.storage.set("lft-weighdate",todayStr);
+                setWID(true); setWIO(false);
+              }}
+              style={btn({flex:2,background:bothFilled?S.lClr:"#1a2a40",color:bothFilled?"#fff":S.muted,padding:14,borderRadius:14,fontWeight:700,fontSize:14,transition:"all 0.2s"})}
+            >Save Weight</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // ── FEEDBACK POPUP ────────────────────────────────────────────────────────
   const FeedbackPopup = () => {
@@ -897,7 +1062,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.6
+          v2026.5.7
         </div>
 
         <BottomNav/>
@@ -1109,7 +1274,8 @@ function App() {
             </div>
           </div>
         )}
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.6</div>
+        <WeighInPopup/>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.7</div>
         <BottomNav/>
       </div>
     );
@@ -1138,10 +1304,13 @@ function App() {
         <div style={{padding:16,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
           {W.exercises.map((ex,i)=>{
             const lc=gc(ex.id,"l"),gg=gc(ex.id,"g"),allDn=gdn(ex.id,"l")+gdn(ex.id,"g")===ex.l.s+ex.g.s;
+            const lPR=prs[ex.id+"_l"]&&wts[ex.id]?.l>=prs[ex.id+"_l"];
+            const gPR=prs[ex.id+"_g"]&&wts[ex.id]?.g>=prs[ex.id+"_g"];
+            const hasPR=lPR||gPR;
             return(
               <button key={ex.id} onClick={()=>{setVEx({wk,i});setDO(false);setScr("exercise");}} style={btn({background:allDn?"rgba(34,197,94,0.1)":S.card,border:`1px solid ${allDn?"#22c55e44":S.border}`,borderRadius:20,padding:"14px 8px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:132,color:S.txt})}>
                 <div style={{fontSize:32}}>{ex.icon}</div>
-                <div style={{fontSize:11,fontWeight:700,textAlign:"center",lineHeight:1.3,color:allDn?"#4ade80":"#c8daf0",marginTop:4}}>{ex.short}</div>
+<div style={{fontSize:11,fontWeight:700,textAlign:"center",lineHeight:1.3,color:allDn?"#4ade80":"#c8daf0",marginTop:4}}>{ex.short}{hasPR&&" 🏆"}</div>
                 <div style={{marginTop:"auto",display:"flex",flexDirection:"column",gap:4,alignItems:"center",paddingTop:8}}>
                   <div style={{display:"flex",gap:4}}>{Array.from({length:ex.l.s}).map((_,si)=>(<div key={si} style={{width:7,height:7,borderRadius:"50%",background:lc[si]?S.lClr:"#162030"}}/>))}</div>
                   <div style={{display:"flex",gap:4}}>{Array.from({length:ex.g.s}).map((_,si)=>(<div key={si} style={{width:7,height:7,borderRadius:"50%",background:gg[si]?S.gClr:"#162030"}}/>))}</div>
@@ -1162,8 +1331,13 @@ function App() {
     const dm=DEMO[ex.id];
 
     const pBox=(pk,clr,data)=>{
-      const {s,r,note}=data,wt=w[pk],arr=gc(ex.id,pk),dn=arr.filter(Boolean).length;
-      const allD=dn===s,someD=dn>0&&dn<s;
+      const poKey=ex.id+"_"+pk, po=poData[poKey]||{};
+      const s = po.pendingSets ?? data.s;
+      const r = po.pendingReps ?? data.r;
+      const note = data.note;
+      const wt=w[pk], arr=gc(ex.id,pk), dn=arr.filter(Boolean).length;
+      const allD=dn===s, someD=dn>0&&dn<s;
+      const isPR = prs[poKey] && wt >= prs[poKey];
       return(
         <div style={{background:S.card,borderRadius:22,padding:18,border:`1px solid ${clr}22`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -1177,7 +1351,9 @@ function App() {
             <div style={{background:S.card2,borderRadius:16,padding:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:92,flexShrink:0,border:`1px solid ${S.border}`}}>
               <div style={{fontSize:30,marginBottom:6}}>{ex.icon}</div>
               <div style={{fontSize:11,fontWeight:700,textAlign:"center",color:"#a0b8d8",lineHeight:1.3}}>{ex.short}</div>
-              <div style={{fontSize:16,fontWeight:800,color:clr,marginTop:10}}>{wt} lbs</div>
+              <div style={{fontSize:16,fontWeight:800,color:clr,marginTop:10}}>
+                {wt} lbs {isPR&&<span style={{fontSize:12}}>🏆</span>}
+              </div>
               <button onClick={()=>setWM({id:ex.id,pk,val:String(wt)})} style={btn({fontSize:11,color:S.muted,marginTop:5,background:"none",padding:"2px 0"})}>✏️ edit</button>
             </div>
             <div style={{flex:1,minWidth:0}}>
@@ -1187,6 +1363,7 @@ function App() {
                   {someD&&<span style={{color:clr,fontSize:13,fontWeight:900,lineHeight:1}}>–</span>}
                 </div>
                 <span style={{fontSize:12,color:S.muted,fontWeight:700}}>All {s} sets</span>
+                {(po.pendingSets||po.pendingReps)&&<span style={{fontSize:10,color:"#fbbf24",marginLeft:4}}>adjusted</span>}
               </button>
               {Array.from({length:s}).map((_,si)=>{
                 const done=arr[si]||false;
@@ -1282,6 +1459,12 @@ function App() {
   if(!isNaN(num)&&num>0){
     const nw={...wts,[wtMod.id]:{...wts[wtMod.id],[wtMod.pk]:num}};
     setWts(nw); saveWts(nw);
+    // Check PR
+    const prKey=wtMod.id+"_"+wtMod.pk;
+    if(!prs[prKey]||num>prs[prKey]){
+      const np={...prs,[prKey]:num};
+      setPRs(np); savePRs(np);
+    }
     // Log to PO history
     const key=wtMod.id+"_"+wtMod.pk;
     const ts=new Date().toISOString().slice(0,10);
@@ -1295,6 +1478,8 @@ function App() {
             </div>
           </div>
         )}
+        <RestTimerBar/>
+        <WeighInPopup/>
         <FeedbackPopup/>
         <BottomNav/>
       </div>

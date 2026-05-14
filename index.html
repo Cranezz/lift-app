@@ -272,6 +272,7 @@ function App() {
   const [fbGiven,setFBG]   = useState({});    // {weekKey_day: true}
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
   const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
+  const [openEx,setOpenEx] = useState(null);    // for lift progress expand/collapse
 
   useEffect(()=>{
     (async()=>{
@@ -565,9 +566,9 @@ function App() {
   const BottomNav=()=>(
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",zIndex:20,paddingBottom:"env(safe-area-inset-bottom)"}}>
       {[{id:"workouts",icon:"💪",label:"Workouts"},{id:"progress",icon:"📈",label:"Progress"},{id:"meals",icon:"🍽️",label:"Meals"}].map(t=>(
-        <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"16px 0 14px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:"none",color:tab===t.id?S.lClr:S.muted})}>
-          <span style={{fontSize:20}}>{t.icon}</span>
-          <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.04em"}}>{t.label}</span>
+        <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="workouts")setScr("home");}} style={btn({flex:1,padding:"18px 0 16px",display:"flex",flexDirection:"column",alignItems:"center",gap:5,background:"none",color:tab===t.id?S.lClr:S.muted})}>
+          <span style={{fontSize:22}}>{t.icon}</span>
+          <span style={{fontSize:11,fontWeight:700,letterSpacing:"0.04em"}}>{t.label}</span>
         </button>
       ))}
     </div>
@@ -814,10 +815,7 @@ function App() {
           })()}
 
           {/* Lift Progress Section */}
-          {(()=>{
-            const [openEx, setOpenEx] = React.useState(null);
-            return(
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{fontSize:16,fontWeight:800,paddingTop:4}}>🏋️ Lift Progress</div>
                 {MUSCLE_GROUPS.map((mg,mgi)=>(
                   <div key={mgi} style={{background:S.card,borderRadius:20,overflow:"hidden",border:`1px solid ${S.border}`}}>
@@ -893,15 +891,13 @@ function App() {
                     })}
                   </div>
                 ))}
-              </div>
-            );
-          })()}
+          </div>
 
         </div>
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.5
+          v2026.5.6
         </div>
 
         <BottomNav/>
@@ -1113,7 +1109,7 @@ function App() {
             </div>
           </div>
         )}
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.5</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.6</div>
         <BottomNav/>
       </div>
     );

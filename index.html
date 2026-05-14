@@ -861,12 +861,11 @@ function App() {
             const YEAR = new Date().getFullYear();
             const todayDate = new Date(); todayDate.setHours(0,0,0,0);
 
-            // Find Sunday on or before Jan 1 of this year
+            // Sunday on or before Jan 1
             const jan1 = new Date(YEAR, 0, 1);
             const startSun = new Date(jan1);
             startSun.setDate(jan1.getDate() - jan1.getDay());
 
-            // Build 53 weeks x 7 days grid
             const NUM_WEEKS = 53;
             const weeks = [];
             for(let w=0; w<NUM_WEEKS; w++){
@@ -891,21 +890,25 @@ function App() {
                   },0);
                   pct=tot>0?dn/tot:0;
                 }
-                week.push({date,dayNum,woKey,isFuture,isOtherYear,pct,isToday:date.toDateString()===todayDate.toDateString()});
+                week.push({date,dayNum,woKey,isFuture,isOtherYear,pct,
+                  isToday:date.toDateString()===todayDate.toDateString()});
               }
               weeks.push(week);
             }
 
+            // Colors — future workout days show faint green all the way to year end
             const cellClr=(cell)=>{
-              if(cell.isOtherYear||cell.isFuture||!cell.woKey) return "rgba(255,255,255,0.03)";
-              if(cell.pct===0) return "rgba(255,255,255,0.07)";
-              if(cell.pct<0.34) return "#14532d";
-              if(cell.pct<0.67) return "#16a34a";
-              if(cell.pct<1)    return "#22c55e";
+              if(cell.isOtherYear)  return "transparent";          // hidden
+              if(!cell.woKey)       return "rgba(255,255,255,0.04)"; // rest day
+              if(cell.isFuture)     return "rgba(34,197,94,0.09)";  // future planned
+              if(cell.pct===0)      return "rgba(255,255,255,0.08)"; // past, skipped
+              if(cell.pct<0.34)     return "#14532d";
+              if(cell.pct<0.67)     return "#16a34a";
+              if(cell.pct<1)        return "#22c55e";
               return "#4ade80";
             };
 
-            // Month label at column where each month first appears
+            // Month label at first column of each month
             const monthAtCol=[];
             const seenMonths=new Set();
             weeks.forEach((week,wi)=>{
@@ -919,7 +922,7 @@ function App() {
               }
             });
 
-            // Week number label every 4 cols
+            // Week number every 4 cols
             const weekLabel=(wi)=>{
               if(wi%4!==0) return "";
               const n=wi+1; return n<=52?String(n):"";
@@ -942,7 +945,11 @@ function App() {
               if(tot>0&&dn2===tot){streak++;}else if(tot>0){break;}
             }
 
-            const CELL=11, GAP=2, STEP=CELL+GAP, LEFT_W=22;
+            const CELL=11, GAP=2, STEP=CELL+GAP, LEFT_W=24;
+
+            // Auto-scroll to current week
+            const currentWeekIdx = Math.floor((todayDate-startSun)/(7*24*3600*1000));
+            const targetScroll = Math.max(0, currentWeekIdx*STEP - 60);
 
             return(
               <div style={{background:S.card,borderRadius:20,padding:18,border:`1px solid ${S.border}`}}>
@@ -951,45 +958,57 @@ function App() {
                   {streak>0&&<div style={{fontSize:12,color:"#4ade80",fontWeight:700}}>🔥 {streak} streak</div>}
                 </div>
 
-                <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-                  <div style={{display:"inline-block"}}>
+                {/* Scrollable grid — auto-scrolled to current week */}
+                <div
+                  style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}
+                  ref={el=>{ if(el) el.scrollLeft=targetScroll; }}
+                >
+                  <div style={{display:"inline-block",paddingBottom:4}}>
 
-                    {/* Month names row */}
-                    <div style={{display:"flex",marginLeft:LEFT_W,marginBottom:1}}>
+                    {/* Month names — overflow:visible so text isn't clipped */}
+                    <div style={{display:"flex",marginLeft:LEFT_W,marginBottom:1,position:"relative",height:12}}>
                       {weeks.map((_,wi)=>{
                         const ml=monthAtCol.find(m=>m.wi===wi);
                         return(
-                          <div key={wi} style={{width:STEP,flexShrink:0,fontSize:8,color:"#6b8aaa",fontWeight:700,overflow:"hidden",whiteSpace:"nowrap"}}>
+                          <div key={wi} style={{
+                            width:STEP,flexShrink:0,
+                            fontSize:8,color:"#7aa0c4",fontWeight:700,
+                            overflow:"visible",whiteSpace:"nowrap",
+                            position:"relative"
+                          }}>
                             {ml?ml.name:""}
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* Week numbers row */}
+                    {/* Week numbers */}
                     <div style={{display:"flex",marginLeft:LEFT_W,marginBottom:4}}>
                       {weeks.map((_,wi)=>(
-                        <div key={wi} style={{width:STEP,flexShrink:0,fontSize:7,color:S.muted,overflow:"hidden"}}>
+                        <div key={wi} style={{width:STEP,flexShrink:0,fontSize:7,color:S.muted,overflow:"visible",whiteSpace:"nowrap"}}>
                           {weekLabel(wi)}
                         </div>
                       ))}
                     </div>
 
-                    {/* Day rows — S M T W Th F S */}
+                    {/* Day rows */}
                     {[0,1,2,3,4,5,6].map(dayIdx=>(
                       <div key={dayIdx} style={{display:"flex",alignItems:"center",marginBottom:GAP}}>
-                        <div style={{width:LEFT_W,flexShrink:0,fontSize:8,color:S.muted,textAlign:"right",paddingRight:4,fontWeight:700}}>
+                        <div style={{width:LEFT_W,flexShrink:0,fontSize:8,color:S.muted,textAlign:"right",paddingRight:5,fontWeight:700}}>
                           {DAY_LABELS[dayIdx]}
                         </div>
                         {weeks.map((week,wi)=>{
                           const cell=week[dayIdx];
+                          const invisible=cell.isOtherYear;
                           return(
                             <div key={wi} style={{
                               width:CELL,height:CELL,borderRadius:2,
                               flexShrink:0,marginRight:GAP,
-                              background:cellClr(cell),
-                              border:cell.isToday?"1.5px solid #4da6ff":"1px solid transparent",
-                              boxSizing:"border-box"
+                              background:invisible?"transparent":cellClr(cell),
+                              border:cell.isToday?"1.5px solid #4da6ff":
+                                     invisible?"none":"1px solid transparent",
+                              boxSizing:"border-box",
+                              visibility:invisible?"hidden":"visible"
                             }}/>
                           );
                         })}
@@ -999,9 +1018,10 @@ function App() {
                   </div>
                 </div>
 
+                {/* Legend */}
                 <div style={{display:"flex",alignItems:"center",gap:5,marginTop:10,justifyContent:"flex-end"}}>
                   <span style={{fontSize:9,color:S.muted}}>Less</span>
-                  {["rgba(255,255,255,0.07)","#14532d","#16a34a","#22c55e","#4ade80"].map((c,i)=>(
+                  {["rgba(255,255,255,0.08)","#14532d","#16a34a","#22c55e","#4ade80"].map((c,i)=>(
                     <div key={i} style={{width:10,height:10,borderRadius:2,background:c}}/>
                   ))}
                   <span style={{fontSize:9,color:S.muted}}>More</span>
@@ -1093,7 +1113,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.9
+          v2026.5.10
         </div>
 
         <BottomNav/>
@@ -1306,7 +1326,7 @@ function App() {
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.9</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.10</div>
         <BottomNav/>
       </div>
     );

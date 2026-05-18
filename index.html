@@ -273,6 +273,7 @@ function App() {
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
   const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
   const [openEx,setOpenEx]   = useState(null);
+  const [exFB,setExFB]         = useState({});  // {exId_pk_weekDay: 'easy'|'good'|'hard'}
   const [restTimer,setRT]    = useState({l:null,g:null});  // {l:{secs,total}|null, g:{secs,total}|null}
   const [prs,setPRs]         = useState({});    // {exId_pk: maxWt}
   const [weighInDone,setWID] = useState(false); // true if logged today
@@ -289,6 +290,7 @@ function App() {
         try{const r=await window.storage.get("lft-fbgiven");if(r)setFBG(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-po");if(r)setPO(JSON.parse(r.value));}catch(e){}
         try{const r=await window.storage.get("lft-prs");if(r)setPRs(JSON.parse(r.value));}catch(e){}
+        try{const r=await window.storage.get("lft-exfb");if(r)setExFB(JSON.parse(r.value));}catch(e){}
         // Check if weighed in today
         const todayStr=new Date().toISOString().slice(0,10);
         try{const r=await window.storage.get("lft-weighdate");if(r&&r.value===todayStr)setWID(true);}catch(e){}
@@ -334,7 +336,8 @@ function App() {
   const saveFBG  = async d=>{if(window.storage)try{await window.storage.set("lft-fbgiven",JSON.stringify(d));}catch(e){}};
   const savePO   = async d=>{if(window.storage)try{await window.storage.set("lft-po",JSON.stringify(d));}catch(e){}};
   const saveAW   = async d=>{if(window.storage)try{await window.storage.set("lft-allweeks",JSON.stringify(d));}catch(e){}};
-  const savePRs  = async d=>{if(window.storage)try{await window.storage.set("lft-prs",JSON.stringify(d));}catch(e){}};
+  const savePRs  = async d=>{if(window.storage)try{await window.storage.set("lft-prs",JSON.stringify(d));}catch(e){}}
+  const saveExFB = async d=>{if(window.storage)try{await window.storage.set("lft-exfb",JSON.stringify(d));}catch(e){}};
   const saveChk  = async wc=>{
     if(window.storage)try{await window.storage.set("lft-chk-"+weekKey,JSON.stringify(wc));}catch(e){}
     // Mirror into allWeeks for heatmap
@@ -741,6 +744,64 @@ function App() {
     );
   };
 
+  // Apply per-exercise feedback immediately
+  const applyExFeedback = (exId, pk, feel) => {
+    const fbKey = exId+"_"+pk+"_"+weekKey+"_"+vDay;
+    const nefb = {...exFB, [fbKey]: feel};
+    setExFB(nefb); saveExFB(nefb);
+
+    const poKey = exId+"_"+pk;
+    const po = poData[poKey]||{};
+    const curWt = wts[exId]?.[pk]||0;
+    const today = new Date().toISOString().slice(0,10);
+    const twoWks = new Date(); twoWks.setDate(twoWks.getDate()+14);
+
+    let newWt = curWt, newSets = null, newReps = null, nextDate = null;
+
+    if(pk==="l"){
+      // Logan: muscle gain
+      if(feel==="easy"){
+        newWt = curWt + 5;
+        nextDate = today;
+      } else if(feel==="hard"){
+        newWt = Math.max(curWt - 5, 5);
+        nextDate = today;
+      } else {
+        nextDate = twoWks.toISOString().slice(0,10);
+      }
+    } else {
+      // GF: weight loss — protect calorie burn
+      if(feel==="easy"){
+        newWt = curWt + 2.5;
+        nextDate = today;
+      } else if(feel==="hard"){
+        // Drop weight but nudge reps up to keep burn
+        newWt = Math.max(curWt - 5, 5);
+        const ex = Object.values(WO).flatMap(w=>w.exercises).find(e=>e.id===exId);
+        newReps = ex ? (po.pendingReps ?? ex.g.r) + 1 : null;
+        nextDate = today;
+      } else {
+        nextDate = twoWks.toISOString().slice(0,10);
+      }
+    }
+
+    const hist = [...(po.history||[])];
+    if(newWt !== curWt) hist.push({date:today, wt:newWt});
+
+    const npo = {...poData, [poKey]:{...po, pendingWt:newWt, pendingReps:newReps??po.pendingReps, nextDate, history:hist.slice(-50)}};
+    setPO(npo); savePO(npo);
+
+    // Apply weight immediately if changed
+    if(newWt !== curWt){
+      const nw = {...wts, [exId]:{...wts[exId], [pk]:newWt}};
+      setWts(nw); saveWts(nw);
+      // Check PR
+      if(!prs[poKey]||newWt>prs[poKey]){
+        const np={...prs,[poKey]:newWt}; setPRs(np); savePRs(np);
+      }
+    }
+  };
+
   if(loading)return(<div style={{background:S.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:S.lClr,fontSize:28}}>💪</div></div>);
 
   const BottomNav=()=>(
@@ -1113,7 +1174,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.10
+          v2026.5.11
         </div>
 
         <BottomNav/>
@@ -1326,7 +1387,7 @@ function App() {
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.10</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.11</div>
         <BottomNav/>
       </div>
     );
@@ -1432,6 +1493,50 @@ function App() {
               })}
             </div>
           </div>
+
+          {/* Per-exercise difficulty feedback */}
+          {(()=>{
+            const fbKey=ex.id+"_"+pk+"_"+weekKey+"_"+vDay;
+            const saved=exFB[fbKey];
+            return(
+              <div style={{marginTop:14,borderTop:`1px solid ${S.border}`,paddingTop:12}}>
+                <div style={{fontSize:11,color:S.muted,fontWeight:700,marginBottom:8}}>
+                  {saved ? "Feedback saved" : "How did that feel?"}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  {[
+                    {val:"easy", label:"😌 Easy",  clr:"#22c55e"},
+                    {val:"good", label:"💪 Good",  clr:clr},
+                    {val:"hard", label:"😤 Hard",  clr:"#ef4444"},
+                  ].map(opt=>{
+                    const sel=saved===opt.val;
+                    return(
+                      <button
+                        key={opt.val}
+                        onClick={()=>applyExFeedback(ex.id,pk,opt.val)}
+                        style={btn({
+                          flex:1,padding:"9px 0",borderRadius:12,fontSize:12,fontWeight:700,
+                          background:sel?opt.clr:"rgba(255,255,255,0.04)",
+                          color:sel?"#fff":S.muted,
+                          border:`1px solid ${sel?opt.clr:"rgba(255,255,255,0.08)"}`,
+                          transition:"all 0.15s"
+                        })}
+                      >{opt.label}</button>
+                    );
+                  })}
+                </div>
+                {saved&&(
+                  <div style={{fontSize:11,color:S.muted,marginTop:8,lineHeight:1.5}}>
+                    {saved==="easy"&&pk==="l"&&"Weight going up 5 lbs next session"}
+                    {saved==="easy"&&pk==="g"&&"Adding 2.5 lbs — keeping the progress moving"}
+                    {saved==="hard"&&pk==="l"&&"Dropping 5 lbs to dial in form"}
+                    {saved==="hard"&&pk==="g"&&"Dropping 5 lbs, adding a rep to keep calorie burn up"}
+                    {saved==="good"&&"On track — increase scheduled in 2 weeks"}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       );
     };

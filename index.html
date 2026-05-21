@@ -22,16 +22,10 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="text/babel">
     const { useState, useEffect } = React;
-
     window.storage = {
-      get: async (key) => {
-        try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; }
-      },
-      set: async (key, value) => {
-        try { localStorage.setItem(key, value); return {value}; } catch(e){ return null; }
-      }
+      get: async (key) => { try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; } },
+      set: async (key, value) => { try { localStorage.setItem(key, value); return {value}; } catch(e){ return null; } }
     };
-
 const SCHED = { 0:"lowerB", 1:"upperA", 2:null, 3:"lowerA", 4:"upperB", 5:null, 6:null };
 const DNAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const DSHRT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -273,7 +267,7 @@ function App() {
   const [poData,setPO]     = useState({});    // {exId_pk: {pendingWt, pendingSets, pendingReps, nextDate, history:[{date,wt}]}}
   const [allWeeks,setAW]   = useState({});    // {weekKey: {dayNum: {exId: {pk: [bool,...]}}}}
   const [openEx,setOpenEx]   = useState(null);
-  const [exFB,setExFB]         = useState({});  // {exId_pk_weekDay: 'easy'|'good'|'hard'}
+  const [exFB,setExFB]         = useState({});  // {exId_pk_wk_day: {feel, prevWt, prevReps}}
   const [restTimer,setRT]    = useState({l:null,g:null});  // {l:{secs,total}|null, g:{secs,total}|null}
   const [prs,setPRs]         = useState({});    // {exId_pk: maxWt}
   const [weighInDone,setWID] = useState(false); // true if logged today
@@ -747,59 +741,74 @@ function App() {
   // Apply per-exercise feedback immediately
   const applyExFeedback = (exId, pk, feel) => {
     const fbKey = exId+"_"+pk+"_"+weekKey+"_"+vDay;
-    const nefb = {...exFB, [fbKey]: feel};
-    setExFB(nefb); saveExFB(nefb);
+    // Already saved — don't re-apply, just update the feel label only
+    if(exFB[fbKey]) return;
 
     const poKey = exId+"_"+pk;
     const po = poData[poKey]||{};
     const curWt = wts[exId]?.[pk]||0;
+    const curReps = po.pendingReps ?? null;
     const today = new Date().toISOString().slice(0,10);
     const twoWks = new Date(); twoWks.setDate(twoWks.getDate()+14);
 
-    let newWt = curWt, newSets = null, newReps = null, nextDate = null;
+    let newWt = curWt, newReps = curReps, nextDate = null;
 
     if(pk==="l"){
-      // Logan: muscle gain
-      if(feel==="easy"){
-        newWt = curWt + 5;
-        nextDate = today;
-      } else if(feel==="hard"){
-        newWt = Math.max(curWt - 5, 5);
-        nextDate = today;
-      } else {
-        nextDate = twoWks.toISOString().slice(0,10);
-      }
+      if(feel==="easy")      { newWt = curWt + 5;              nextDate = today; }
+      else if(feel==="hard") { newWt = Math.max(curWt-5, 5);   nextDate = today; }
+      else                   { nextDate = twoWks.toISOString().slice(0,10); }
     } else {
-      // GF: weight loss — protect calorie burn
-      if(feel==="easy"){
-        newWt = curWt + 2.5;
+      if(feel==="easy")      { newWt = curWt + 2.5;            nextDate = today; }
+      else if(feel==="hard") {
+        newWt = Math.max(curWt-5, 5);
+        const exDef = Object.values(WO).flatMap(w=>w.exercises).find(e=>e.id===exId);
+        newReps = exDef ? (po.pendingReps ?? exDef.g.r) + 1 : curReps;
         nextDate = today;
-      } else if(feel==="hard"){
-        // Drop weight but nudge reps up to keep burn
-        newWt = Math.max(curWt - 5, 5);
-        const ex = Object.values(WO).flatMap(w=>w.exercises).find(e=>e.id===exId);
-        newReps = ex ? (po.pendingReps ?? ex.g.r) + 1 : null;
-        nextDate = today;
-      } else {
-        nextDate = twoWks.toISOString().slice(0,10);
-      }
+      } else { nextDate = twoWks.toISOString().slice(0,10); }
     }
+
+    // Save feedback WITH the previous values so we can undo exactly
+    const nefb = {...exFB, [fbKey]: {feel, prevWt:curWt, prevReps:curReps}};
+    setExFB(nefb); saveExFB(nefb);
 
     const hist = [...(po.history||[])];
     if(newWt !== curWt) hist.push({date:today, wt:newWt});
-
-    const npo = {...poData, [poKey]:{...po, pendingWt:newWt, pendingReps:newReps??po.pendingReps, nextDate, history:hist.slice(-50)}};
+    const npo = {...poData, [poKey]:{...po, pendingWt:newWt, pendingReps:newReps, nextDate, history:hist.slice(-50)}};
     setPO(npo); savePO(npo);
 
-    // Apply weight immediately if changed
     if(newWt !== curWt){
       const nw = {...wts, [exId]:{...wts[exId], [pk]:newWt}};
       setWts(nw); saveWts(nw);
-      // Check PR
       if(!prs[poKey]||newWt>prs[poKey]){
         const np={...prs,[poKey]:newWt}; setPRs(np); savePRs(np);
       }
     }
+  };
+
+  const undoExFeedback = (exId, pk) => {
+    const fbKey = exId+"_"+pk+"_"+weekKey+"_"+vDay;
+    const saved = exFB[fbKey];
+    if(!saved) return;
+    const {prevWt, prevReps} = saved;
+
+    // Restore weight
+    const nw = {...wts, [exId]:{...wts[exId], [pk]:prevWt}};
+    setWts(nw); saveWts(nw);
+
+    // Restore PO data
+    const poKey = exId+"_"+pk;
+    const po = poData[poKey]||{};
+    // Remove the last history entry that was added by this feedback
+    const hist = [...(po.history||[])];
+    const lastIdx = hist.map(h=>h.wt).lastIndexOf(po.pendingWt);
+    if(lastIdx>=0) hist.splice(lastIdx,1);
+    const npo = {...poData, [poKey]:{...po, pendingWt:prevWt, pendingReps:prevReps, history:hist}};
+    setPO(npo); savePO(npo);
+
+    // Clear the feedback entry
+    const nefb = {...exFB};
+    delete nefb[fbKey];
+    setExFB(nefb); saveExFB(nefb);
   };
 
   if(loading)return(<div style={{background:S.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:S.lClr,fontSize:28}}>💪</div></div>);
@@ -1174,7 +1183,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.11
+          v2026.5.12
         </div>
 
         <BottomNav/>
@@ -1387,7 +1396,7 @@ function App() {
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.11</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.12</div>
         <BottomNav/>
       </div>
     );
@@ -1497,41 +1506,52 @@ function App() {
           {/* Per-exercise difficulty feedback */}
           {(()=>{
             const fbKey=ex.id+"_"+pk+"_"+weekKey+"_"+vDay;
-            const saved=exFB[fbKey];
+            const saved=exFB[fbKey]; // {feel, prevWt, prevReps} or undefined
+            const feel=saved?.feel;
             return(
               <div style={{marginTop:14,borderTop:`1px solid ${S.border}`,paddingTop:12}}>
-                <div style={{fontSize:11,color:S.muted,fontWeight:700,marginBottom:8}}>
-                  {saved ? "Feedback saved" : "How did that feel?"}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:11,color:S.muted,fontWeight:700}}>
+                    {feel ? "Feedback saved — tap Undo to reverse" : "How did that feel?"}
+                  </div>
+                  {feel&&(
+                    <button
+                      onClick={()=>undoExFeedback(ex.id,pk)}
+                      style={btn({fontSize:11,color:"#fb923c",fontWeight:700,background:"rgba(251,146,60,0.1)",padding:"4px 10px",borderRadius:8,border:"1px solid rgba(251,146,60,0.3)"})}
+                    >↩ Undo</button>
+                  )}
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   {[
-                    {val:"easy", label:"😌 Easy",  clr:"#22c55e"},
-                    {val:"good", label:"💪 Good",  clr:clr},
-                    {val:"hard", label:"😤 Hard",  clr:"#ef4444"},
+                    {val:"easy", label:"😌 Easy", clr:"#22c55e"},
+                    {val:"good", label:"💪 Good", clr:clr},
+                    {val:"hard", label:"😤 Hard", clr:"#ef4444"},
                   ].map(opt=>{
-                    const sel=saved===opt.val;
+                    const sel=feel===opt.val;
                     return(
                       <button
                         key={opt.val}
-                        onClick={()=>applyExFeedback(ex.id,pk,opt.val)}
+                        onClick={()=>{ if(!feel) applyExFeedback(ex.id,pk,opt.val); }}
                         style={btn({
                           flex:1,padding:"9px 0",borderRadius:12,fontSize:12,fontWeight:700,
-                          background:sel?opt.clr:"rgba(255,255,255,0.04)",
-                          color:sel?"#fff":S.muted,
-                          border:`1px solid ${sel?opt.clr:"rgba(255,255,255,0.08)"}`,
-                          transition:"all 0.15s"
+                          background:sel?opt.clr:feel?"rgba(255,255,255,0.02)":"rgba(255,255,255,0.04)",
+                          color:sel?"#fff":feel?"#2a3d55":S.muted,
+                          border:`1px solid ${sel?opt.clr:"rgba(255,255,255,0.06)"}`,
+                          cursor:feel&&!sel?"default":"pointer",
+                          transition:"all 0.15s",
+                          opacity:feel&&!sel?0.4:1
                         })}
                       >{opt.label}</button>
                     );
                   })}
                 </div>
-                {saved&&(
+                {feel&&(
                   <div style={{fontSize:11,color:S.muted,marginTop:8,lineHeight:1.5}}>
-                    {saved==="easy"&&pk==="l"&&"Weight going up 5 lbs next session"}
-                    {saved==="easy"&&pk==="g"&&"Adding 2.5 lbs — keeping the progress moving"}
-                    {saved==="hard"&&pk==="l"&&"Dropping 5 lbs to dial in form"}
-                    {saved==="hard"&&pk==="g"&&"Dropping 5 lbs, adding a rep to keep calorie burn up"}
-                    {saved==="good"&&"On track — increase scheduled in 2 weeks"}
+                    {feel==="easy"&&pk==="l"&&`+5 lbs applied (was ${saved.prevWt} lbs)`}
+                    {feel==="easy"&&pk==="g"&&`+2.5 lbs applied (was ${saved.prevWt} lbs)`}
+                    {feel==="hard"&&pk==="l"&&`−5 lbs applied (was ${saved.prevWt} lbs)`}
+                    {feel==="hard"&&pk==="g"&&`−5 lbs applied (was ${saved.prevWt} lbs), +1 rep`}
+                    {feel==="good"&&"No change — increase scheduled in 2 weeks"}
                   </div>
                 )}
               </div>
@@ -1644,7 +1664,6 @@ function App() {
 
   return null;
 }
-
 
 
     const root = ReactDOM.createRoot(document.getElementById('root'));

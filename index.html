@@ -13,14 +13,49 @@
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; }
     ::-webkit-scrollbar { display:none; }
+    #boot { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#4da6ff; font-size:32px; gap:16px; }
+    #boot .msg { font-size:13px; color:#4d6080; max-width:260px; text-align:center; line-height:1.6; }
+    #boot button { background:#1e293b; color:#8ba8d0; border:1px solid #334155; padding:12px 24px; border-radius:12px; font-size:14px; font-weight:700; margin-top:8px; }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script type="text/babel">
+  <div id="root">
+    <div id="boot">
+      <div>💪</div>
+      <div class="msg" id="bootmsg">Loading LiftTogether...</div>
+    </div>
+  </div>
+
+  <script>
+    // Track whether libraries load; show a helpful message if they don't
+    window.__libsLoaded = { react:false, reactdom:false, babel:false };
+    function libFail(name){
+      var el = document.getElementById('bootmsg');
+      if(el){
+        el.innerHTML = "Couldn't load required files ("+name+"). Check your internet connection, then tap below.";
+        var btn = document.createElement('button');
+        btn.textContent = "Retry";
+        btn.onclick = function(){ location.reload(); };
+        document.getElementById('boot').appendChild(btn);
+      }
+    }
+    // If after 10 seconds the app still hasn't mounted, show retry
+    setTimeout(function(){
+      var boot = document.getElementById('boot');
+      if(boot && boot.parentNode){
+        var msg = document.getElementById('bootmsg');
+        if(msg && msg.textContent.indexOf('Loading')===0){
+          libFail('timeout');
+        }
+      }
+    }, 10000);
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js" crossorigin onerror="libFail('React')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin onerror="libFail('ReactDOM')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js" onerror="libFail('Babel')"></script>
+
+  <script type="text/babel" data-presets="react">
     const { useState, useEffect } = React;
 
     window.storage = {
@@ -1235,7 +1270,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.13
+          v2026.5.14
         </div>
 
         <BottomNav/>
@@ -1458,7 +1493,7 @@ function App() {
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.13</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.14</div>
         <BottomNav/>
       </div>
     );
@@ -1744,14 +1779,8 @@ function App() {
               <div style={{fontSize:12,color:"#2a3d55",marginBottom:28,maxWidth:280,lineHeight:1.6}}>
                 Your workout data is stored separately and will not be lost unless you tap the red button below.
               </div>
-              <button
-                onClick={()=>{localStorage.clear();window.location.reload();}}
-                style={{background:"#ef4444",color:"white",padding:"14px 28px",borderRadius:14,fontSize:15,fontWeight:700,border:"none",cursor:"pointer",marginBottom:12}}
-              >Clear Data and Restart</button>
-              <button
-                onClick={()=>window.location.reload()}
-                style={{background:"#1e293b",color:"#64748b",padding:"12px 28px",borderRadius:14,fontSize:14,fontWeight:600,border:"1px solid #334155",cursor:"pointer"}}
-              >Try Again (keeps data)</button>
+              <button onClick={()=>{localStorage.clear();window.location.reload();}} style={{background:"#ef4444",color:"white",padding:"14px 28px",borderRadius:14,fontSize:15,fontWeight:700,border:"none",cursor:"pointer",marginBottom:12}}>Clear Data and Restart</button>
+              <button onClick={()=>window.location.reload()} style={{background:"#1e293b",color:"#64748b",padding:"12px 28px",borderRadius:14,fontSize:14,fontWeight:600,border:"1px solid #334155",cursor:"pointer"}}>Try Again (keeps data)</button>
             </div>
           );
         }
@@ -1759,7 +1788,10 @@ function App() {
       }
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
+    // Mount — replaces the boot loader
+    const rootEl = document.getElementById('root');
+    rootEl.innerHTML = "";
+    const root = ReactDOM.createRoot(rootEl);
     root.render(<ErrorBoundary><App/></ErrorBoundary>);
   </script>
 </body>

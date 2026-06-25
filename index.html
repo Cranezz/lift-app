@@ -22,10 +22,12 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="text/babel">
     const { useState, useEffect } = React;
+
     window.storage = {
       get: async (key) => { try { const v = localStorage.getItem(key); return v ? {value:v} : null; } catch(e){ return null; } },
       set: async (key, value) => { try { localStorage.setItem(key, value); return {value}; } catch(e){ return null; } }
     };
+
 const SCHED = { 0:"lowerB", 1:"upperA", 2:null, 3:"lowerA", 4:"upperB", 5:null, 6:null };
 const DNAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const DSHRT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -275,24 +277,74 @@ function App() {
   const [weighInVals,setWIV] = useState({l:"",g:""});
 
   useEffect(()=>{
+    // Safe JSON parse — returns fallback if value is missing or corrupted
+    const safeLoad = async (key, fallback) => {
+      try {
+        const r = await window.storage.get(key);
+        if(!r) return fallback;
+        const parsed = JSON.parse(r.value);
+        if(parsed===null||parsed===undefined) return fallback;
+        return parsed;
+      } catch(e) { return fallback; }
+    };
+
     (async()=>{
       if(window.storage){
-        try{const r=await window.storage.get("lft-wts");if(r)setWts(p=>({...DW,...JSON.parse(r.value)}));}catch(e){}
-        try{const r=await window.storage.get("lft-meta");if(r){const m=JSON.parse(r.value);if(m.bw)setBw(m.bw);if(m.nms)setNms(m.nms);}}catch(e){}
-        try{const r=await window.storage.get("lft-chk-"+weekKey);if(r)setWC(JSON.parse(r.value));}catch(e){}
-        try{const r=await window.storage.get("lft-bwhist");if(r)setBWH(JSON.parse(r.value));}catch(e){}
-        try{const r=await window.storage.get("lft-fbgiven");if(r)setFBG(JSON.parse(r.value));}catch(e){}
-        try{const r=await window.storage.get("lft-po");if(r)setPO(JSON.parse(r.value));}catch(e){}
-        try{const r=await window.storage.get("lft-prs");if(r)setPRs(JSON.parse(r.value));}catch(e){}
-        try{const r=await window.storage.get("lft-exfb");if(r)setExFB(JSON.parse(r.value));}catch(e){}
-        // Check if weighed in today
+        const savedWts = await safeLoad("lft-wts", {});
+        if(typeof savedWts==="object") setWts({...DW, ...savedWts});
+
+        const meta = await safeLoad("lft-meta", {});
+        if(meta.bw && typeof meta.bw.l==="number") setBw(meta.bw);
+        if(meta.nms && meta.nms.l) setNms(meta.nms);
+
+        const weekData = await safeLoad("lft-chk-"+weekKey, {});
+        if(typeof weekData==="object") setWC(weekData);
+
+        const bwhist = await safeLoad("lft-bwhist", {l:[],g:[]});
+        if(bwhist.l && bwhist.g) setBWH(bwhist);
+
+        const fbgiven = await safeLoad("lft-fbgiven", {});
+        if(typeof fbgiven==="object") setFBG(fbgiven);
+
+        // PO data — validate each entry's pendingWt is a valid number
+        const rawPO = await safeLoad("lft-po", {});
+        if(typeof rawPO==="object"){
+          const cleanPO = {};
+          Object.entries(rawPO).forEach(([k,v])=>{
+            if(v && typeof v==="object"){
+              cleanPO[k] = {
+                ...v,
+                pendingWt: (typeof v.pendingWt==="number" && !isNaN(v.pendingWt)) ? v.pendingWt : undefined,
+                history: Array.isArray(v.history)
+                  ? v.history.filter(h=>h&&typeof h.wt==="number"&&!isNaN(h.wt))
+                  : [],
+              };
+            }
+          });
+          setPO(cleanPO);
+        }
+
+        const savedPRs = await safeLoad("lft-prs", {});
+        if(typeof savedPRs==="object") setPRs(savedPRs);
+
+        // exFB — migrate old string format to new object format
+        const rawExFB = await safeLoad("lft-exfb", {});
+        if(typeof rawExFB==="object"){
+          const cleanFB = {};
+          Object.entries(rawExFB).forEach(([k,v])=>{
+            if(typeof v==="string") cleanFB[k] = {feel:v, prevWt:undefined, prevReps:undefined};
+            else if(v && typeof v==="object") cleanFB[k] = v;
+          });
+          setExFB(cleanFB);
+        }
+
         const todayStr=new Date().toISOString().slice(0,10);
-        try{const r=await window.storage.get("lft-weighdate");if(r&&r.value===todayStr)setWID(true);}catch(e){}
-        // Load all historical week keys for heatmap
-        try{
-          const awR=await window.storage.get("lft-allweeks");
-          if(awR){ setAW(JSON.parse(awR.value)); }
-        }catch(e){}
+        const weighDate = await safeLoad("lft-weighdate", null);
+        if(weighDate===todayStr) setWID(true);
+
+        const allW = await safeLoad("lft-allweeks", {});
+        if(typeof allW==="object") setAW(allW);
+        // allWeeks loaded above via safeLoad
       }
       // Seed body weight history if empty
       const todaySeed=new Date().toISOString().slice(0,10);
@@ -372,8 +424,8 @@ function App() {
   const gdnDay   = (day,id,pk)=>gcDay(day,id,pk).filter(Boolean).length;
 
   const gAll     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+e.l.s+e.g.s,0);
-  const gTot     = wk=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdn(e.id,"l")+gdn(e.id,"g"),0);
-  const gTotDay  = (wk,day)=>!wk?0:WO[wk].exercises.reduce((a,e)=>a+gdnDay(day,e.id,"l")+gdnDay(day,e.id,"g"),0);
+  const gTot     = wk=>(!wk||!WO[wk])?0:WO[wk].exercises.reduce((a,e)=>a+gdn(e.id,"l")+gdn(e.id,"g"),0);
+  const gTotDay  = (wk,day)=>(!wk||!WO[wk])?0:WO[wk].exercises.reduce((a,e)=>a+gdnDay(day,e.id,"l")+gdnDay(day,e.id,"g"),0);
 
   // Open weigh-in popup on load if not done today
   useEffect(()=>{
@@ -1183,7 +1235,7 @@ function App() {
 
         {/* Version */}
         <div style={{textAlign:"center",padding:"24px 0 8px",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>
-          v2026.5.12
+          v2026.5.13
         </div>
 
         <BottomNav/>
@@ -1392,11 +1444,21 @@ function App() {
   setBWH(nh); saveBWH(nh); setSO(false);
 }} style={btn({flex:1,background:S.lClr,color:"#fff",padding:14,borderRadius:14,fontWeight:700,fontSize:15})}>Save</button>
               </div>
+              <div style={{height:1,background:"rgba(255,255,255,0.05)",margin:"18px 0 12px"}}/>
+              <button
+                onClick={()=>{
+                  if(window.confirm("Reset ALL app data? This clears workout history, weights, and progress. Cannot be undone.")){
+                    localStorage.clear(); window.location.reload();
+                  }
+                }}
+                style={btn({width:"100%",background:"rgba(239,68,68,0.08)",color:"#f87171",padding:12,borderRadius:14,fontWeight:700,fontSize:13,border:"1px solid rgba(239,68,68,0.2)"})}
+              >🗑️ Reset All App Data</button>
+              <div style={{fontSize:10,color:"#1e3050",textAlign:"center",marginTop:6}}>Only use if the app is broken. Cannot be undone.</div>
             </div>
           </div>
         )}
         <WeighInPopup/>
-        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.12</div>
+        <div style={{textAlign:"center",padding:"8px 0",fontSize:10,color:"#1e3050",fontWeight:600,letterSpacing:"0.06em"}}>v2026.5.13</div>
         <BottomNav/>
       </div>
     );
@@ -1666,8 +1728,39 @@ function App() {
 }
 
 
+
+    class ErrorBoundary extends React.Component {
+      constructor(props){ super(props); this.state={error:null}; }
+      static getDerivedStateFromError(e){ return {error:e}; }
+      render(){
+        if(this.state.error){
+          return(
+            <div style={{background:"#070d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,color:"white",fontFamily:"-apple-system,sans-serif",textAlign:"center"}}>
+              <div style={{fontSize:40,marginBottom:16}}>⚠️</div>
+              <div style={{fontSize:20,fontWeight:800,marginBottom:8}}>App crashed</div>
+              <div style={{fontSize:13,color:"#4d6080",marginBottom:8,maxWidth:280,lineHeight:1.6}}>
+                {this.state.error?.message||"Something went wrong while loading."}
+              </div>
+              <div style={{fontSize:12,color:"#2a3d55",marginBottom:28,maxWidth:280,lineHeight:1.6}}>
+                Your workout data is stored separately and will not be lost unless you tap the red button below.
+              </div>
+              <button
+                onClick={()=>{localStorage.clear();window.location.reload();}}
+                style={{background:"#ef4444",color:"white",padding:"14px 28px",borderRadius:14,fontSize:15,fontWeight:700,border:"none",cursor:"pointer",marginBottom:12}}
+              >Clear Data and Restart</button>
+              <button
+                onClick={()=>window.location.reload()}
+                style={{background:"#1e293b",color:"#64748b",padding:"12px 28px",borderRadius:14,fontSize:14,fontWeight:600,border:"1px solid #334155",cursor:"pointer"}}
+              >Try Again (keeps data)</button>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App/>);
+    root.render(<ErrorBoundary><App/></ErrorBoundary>);
   </script>
 </body>
 </html>
